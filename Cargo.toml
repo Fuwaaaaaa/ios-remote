@@ -2,5 +2,44 @@
 name = "ios-remote"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "AirPlay screen mirroring receiver for Windows, written in Rust"
 
 [dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# mDNS service advertisement
+mdns-sd = "0.11"
+
+# Network / codec
+tokio-util = { version = "0.7", features = ["codec"] }
+bytes = "1"
+
+# Crypto — pair-setup / pair-verify / FairPlay
+aes = "0.8"
+aes-gcm = "0.10"
+cbc = { version = "0.1", features = ["alloc"] }
+chacha20poly1305 = "0.10"
+hkdf = "0.12"
+sha2 = "0.10"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8"] }
+rand = "0.8"
+
+# Serialization (binary plist for AirPlay)
+plist = "1"
+
+# H.264 decode
+openh264 = "0.6"
+
+# Window / rendering
+minifb = "0.28"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
