@@ -1,6 +1,6 @@
 [package]
 name = "ios-remote"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 description = "Full-featured AirPlay mirroring receiver + iPhone integration for Windows"
@@ -8,23 +8,15 @@ description = "Full-featured AirPlay mirroring receiver + iPhone integration for
 [features]
 default = []
 vr = []
+lua = ["mlua"]
 
 [dependencies]
-# Async runtime
 tokio = { version = "1", features = ["full"] }
-
-# mDNS
 mdns-sd = "0.11"
-
-# Network / codec
 tokio-util = { version = "0.7", features = ["codec"] }
 bytes = "1"
-
-# HTTP server
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "fs"] }
-
-# Crypto
 aes = "0.8"
 aes-gcm = "0.10"
 cbc = { version = "0.1", features = ["alloc"] }
@@ -34,45 +26,30 @@ sha2 = "0.10"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8"] }
 rand = "0.8"
-
-# Serialization
 plist = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
-
-# H.264 decode
 openh264 = "0.6"
-
-# Window / rendering
 minifb = "0.28"
-
-# Image processing
 image = "0.25"
 imageproc = "0.25"
-
-# QR code detection
 rqrr = "0.8"
-
-# GIF encoding
 gif = "0.13"
-
-# MP4 recording
 mp4 = "0.14"
-
-# Clipboard
 arboard = "3"
-
-# Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# Error handling
 thiserror = "2"
 anyhow = "1"
-
-# CLI
 clap = { version = "4", features = ["derive"] }
-
-# Timestamps
 chrono = { version = "0.4", features = ["serde"] }
+
+# Lua scripting (optional)
+mlua = { version = "0.10", features = ["lua54", "async", "vendored"], optional = true }
+
+# WebRTC (screen sharing)
+# webrtc = "0.12"  # TODO: heavy dep, enable when needed
+
+# Registry (Windows startup)
+winreg = "0.55"

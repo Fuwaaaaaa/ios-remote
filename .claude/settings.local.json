@@ -8,7 +8,8 @@
       "Bash(cargo build:*)",
       "Bash(cargo run:*)",
       "Bash(cargo fix:*)",
-      "Bash(find src:*)"
+      "Bash(find src:*)",
+      "Bash(cargo test:*)"
     ]
   }
 }
