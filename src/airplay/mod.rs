@@ -1,3 +1,4 @@
+pub mod audio;
 pub mod crypto;
 pub mod display;
 pub mod event;

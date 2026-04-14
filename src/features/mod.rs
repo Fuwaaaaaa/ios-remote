@@ -6,6 +6,7 @@ pub mod notification_capture;
 pub mod ocr;
 pub mod recording;
 pub mod screenshot;
+pub mod stats_overlay;
 pub mod streaming;
 pub mod touch_overlay;
 pub mod vr_overlay;
