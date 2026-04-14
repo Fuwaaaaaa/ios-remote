@@ -12,6 +12,7 @@ pub mod custom_cursor;
 pub mod color_picker;
 pub mod design_overlay;
 pub mod device_frame;
+pub mod display;
 pub mod drag_drop;
 pub mod frame_analysis;
 pub mod game_mode;

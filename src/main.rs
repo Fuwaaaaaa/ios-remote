@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-mod airplay;
 mod config;
 mod devtools;
 mod error;
@@ -8,45 +7,30 @@ mod features;
 mod idevice;
 mod system;
 mod ui;
+mod usb;
 
-use airplay::AirPlayReceiver;
 use clap::Parser;
+use features::FrameBus;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
-#[command(name = "ios-remote", about = "AirPlay mirroring receiver + iPhone integration")]
+#[command(name = "ios-remote", about = "iPhone screen mirroring via USB Type-C")]
 struct Cli {
-    /// Receiver display name (shown on iPhone)
+    /// Display window name
     #[arg(short, long, default_value = "ios-remote")]
     name: String,
-
-    /// RTSP listen port
-    #[arg(short, long, default_value_t = 7000)]
-    port: u16,
 
     /// Web dashboard port
     #[arg(short = 'w', long, default_value_t = 8080)]
     web_port: u16,
 
-    /// Enable recording (saves to ./recordings/)
+    /// Enable recording
     #[arg(long)]
     record: bool,
 
-    /// Enable OBS virtual camera output
-    #[arg(long)]
-    obs: bool,
-
-    /// Enable always-on-top picture-in-picture mode
+    /// PiP mode (always on top)
     #[arg(long)]
     pip: bool,
-
-    /// Enable RTMP streaming (provide URL)
-    #[arg(long)]
-    rtmp: Option<String>,
-
-    /// Use config file instead of CLI args
-    #[arg(long)]
-    config: bool,
 }
 
 #[tokio::main]
@@ -61,45 +45,51 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    // Load or create config file if --config flag is set
-    let app_config = if cli.config {
-        config::AppConfig::load()
-    } else {
-        config::AppConfig::default()
-    };
+    tracing::info!(
+        "ios-remote v{} — USB Type-C mode",
+        env!("CARGO_PKG_VERSION")
+    );
 
-    let receiver_config = airplay::ReceiverConfig {
-        name: if cli.config { app_config.receiver.name.clone() } else { cli.name },
-        port: if cli.config { app_config.receiver.port } else { cli.port },
-        record: cli.record || app_config.recording.auto_record,
-        obs_virtual_camera: cli.obs || app_config.features.obs_virtual_camera,
-        pip_mode: cli.pip || app_config.display.pip_mode,
-        rtmp_url: if cli.rtmp.is_some() { cli.rtmp } else if !app_config.network.rtmp_url.is_empty() { Some(app_config.network.rtmp_url.clone()) } else { None },
-    };
+    // Frame bus: decoded frames broadcast to all consumers
+    let frame_bus = FrameBus::new();
 
-    // Start web dashboard + REST API
-    let frame_bus = features::FrameBus::new();
-    let api_state = std::sync::Arc::new(ui::api::ApiState {
-        frame_bus: frame_bus.clone(),
-        config: std::sync::Arc::new(tokio::sync::Mutex::new(app_config)),
-        history: std::sync::Arc::new(tokio::sync::Mutex::new(config::ConnectionHistory::load())),
-        stats: std::sync::Arc::new(tokio::sync::Mutex::new(ui::api::StreamStats::default())),
+    // Display window (OS thread)
+    let display_bus = frame_bus.clone();
+    let pip = cli.pip;
+    let display_handle = std::thread::spawn(move || {
+        features::display::run_display(display_bus.subscribe(), pip);
     });
 
+    // Recording
+    if cli.record {
+        let rx = frame_bus.subscribe();
+        tokio::spawn(async move {
+            features::recording::run(rx).await;
+        });
+        tracing::info!("Recording enabled → ./recordings/");
+    }
+
+    // Web dashboard
+    let web_bus = frame_bus.clone();
     let web_port = cli.web_port;
-    let api = api_state.clone();
     tokio::spawn(async move {
-        let app = ui::api::router(api)
+        let api_state = std::sync::Arc::new(ui::api::ApiState {
+            frame_bus: web_bus,
+            config: std::sync::Arc::new(tokio::sync::Mutex::new(config::AppConfig::default())),
+            history: std::sync::Arc::new(tokio::sync::Mutex::new(config::ConnectionHistory::default())),
+            stats: std::sync::Arc::new(tokio::sync::Mutex::new(ui::api::StreamStats::default())),
+        });
+        let app = ui::api::router(api_state)
             .route("/", axum::routing::get(ui::web::dashboard));
-
-        let listener = tokio::net::TcpListener::bind(("0.0.0.0", web_port))
-            .await
-            .expect("Failed to bind web dashboard port");
-
+        let listener = tokio::net::TcpListener::bind(("0.0.0.0", web_port)).await.unwrap();
         tracing::info!(port = web_port, "Web dashboard: http://localhost:{}", web_port);
-        axum::serve(listener, app).await.unwrap();
+        let _ = axum::serve(listener, app).await;
     });
 
-    let receiver = AirPlayReceiver::new(receiver_config);
-    receiver.run().await
+    // USB connection (main task)
+    let receiver = usb::UsbReceiver::new(frame_bus);
+    receiver.run().await?;
+
+    let _ = display_handle.join();
+    Ok(())
 }

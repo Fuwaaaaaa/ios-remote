@@ -1,9 +1,9 @@
 [package]
 name = "ios-remote"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 license = "MIT"
-description = "Full-featured AirPlay mirroring receiver + iPhone integration for Windows"
+description = "iPhone screen mirroring & control via USB Type-C — written in Rust"
 
 [features]
 default = []
@@ -12,31 +12,18 @@ lua = ["mlua"]
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-mdns-sd = "0.11"
 tokio-util = { version = "0.7", features = ["codec"] }
 bytes = "1"
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "fs"] }
-aes = "0.8"
-aes-gcm = "0.10"
-cbc = { version = "0.1", features = ["alloc"] }
-chacha20poly1305 = "0.10"
-hkdf = "0.12"
-sha2 = "0.10"
-x25519-dalek = { version = "2", features = ["static_secrets"] }
-ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8"] }
-rand = "0.8"
 plist = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
-openh264 = "0.6"
 minifb = "0.28"
 image = "0.25"
-imageproc = "0.25"
 rqrr = "0.8"
 gif = "0.13"
-mp4 = "0.14"
 arboard = "3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -44,12 +31,8 @@ thiserror = "2"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+winreg = "0.55"
 
 # Lua scripting (optional)
 mlua = { version = "0.10", features = ["lua54", "async", "vendored"], optional = true }
-
-# WebRTC (screen sharing)
-# webrtc = "0.12"  # TODO: heavy dep, enable when needed
-
-# Registry (Windows startup)
-winreg = "0.55"
