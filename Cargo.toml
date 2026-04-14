@@ -1,30 +1,30 @@
 [package]
 name = "ios-remote"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 description = "Full-featured AirPlay mirroring receiver + iPhone integration for Windows"
 
 [features]
 default = []
-vr = []  # Enable OpenVR overlay support (requires SteamVR)
+vr = []
 
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
-# mDNS service advertisement
+# mDNS
 mdns-sd = "0.11"
 
 # Network / codec
 tokio-util = { version = "0.7", features = ["codec"] }
 bytes = "1"
 
-# HTTP server (Web UI + REST API)
+# HTTP server
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "fs"] }
 
-# Crypto — pair-setup / pair-verify / FairPlay
+# Crypto
 aes = "0.8"
 aes-gcm = "0.10"
 cbc = { version = "0.1", features = ["alloc"] }
@@ -49,9 +49,19 @@ minifb = "0.28"
 
 # Image processing
 image = "0.25"
+imageproc = "0.25"
+
+# QR code detection
+rqrr = "0.8"
+
+# GIF encoding
+gif = "0.13"
 
 # MP4 recording
 mp4 = "0.14"
+
+# Clipboard
+arboard = "3"
 
 # Logging
 tracing = "0.1"
