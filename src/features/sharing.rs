@@ -1,6 +1,5 @@
 use super::Frame;
-use serde::Serialize;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Screen sharing via simple HTTP MJPEG stream.
 ///
@@ -11,7 +10,7 @@ pub async fn serve_mjpeg(
     mut rx: tokio::sync::broadcast::Receiver<std::sync::Arc<Frame>>,
     port: u16,
 ) {
-    use axum::{response::IntoResponse, routing::get, Router};
+    use axum::{routing::get, Router};
     use tokio::net::TcpListener;
 
     let (tx, _) = tokio::sync::broadcast::channel::<Vec<u8>>(4);
@@ -33,7 +32,7 @@ pub async fn serve_mjpeg(
     });
 
     let app = Router::new().route("/stream", get(move || {
-        let mut rx = tx.subscribe();
+        let _rx = tx.subscribe();
         async move {
             let boundary = "frame";
             let headers = [
@@ -53,7 +52,7 @@ pub async fn serve_mjpeg(
 
 fn encode_jpeg(frame: &Frame) -> Result<Vec<u8>, String> {
     use image::{ImageBuffer, Rgba};
-    let img: ImageBuffer<Rgba<u8>, _> = ImageBuffer::from_raw(
+    let _img: ImageBuffer<Rgba<u8>, _> = ImageBuffer::from_raw(
         frame.width, frame.height, frame.rgba.clone(),
     ).ok_or("Image buffer creation failed")?;
 
@@ -100,7 +99,7 @@ impl NotificationForwarder {
             Self::post_json(url, &body);
         }
 
-        if let (Some(ref token), Some(ref chat_id)) = (&self.telegram_bot_token, &self.telegram_chat_id) {
+        if let (Some(token), Some(chat_id)) = (&self.telegram_bot_token, &self.telegram_chat_id) {
             let url = format!("https://api.telegram.org/bot{}/sendMessage", token);
             let body = serde_json::json!({"chat_id": chat_id, "text": format!("{}\n{}", title, message)});
             Self::post_json(&url, &body);
