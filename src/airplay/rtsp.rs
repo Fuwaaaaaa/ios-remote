@@ -17,14 +17,14 @@ impl RtspServer {
     pub async fn bind(
         addr: impl tokio::net::ToSocketAddrs,
         state: SharedState,
-    ) -> Result<Self, crate::error::AirPlayError> {
+    ) -> Result<Self, crate::error::Error> {
         let listener = TcpListener::bind(addr).await?;
         let local = listener.local_addr()?;
         info!(addr = %local, "RTSP server listening");
         Ok(Self { listener, state })
     }
 
-    pub async fn run(self) -> Result<(), crate::error::AirPlayError> {
+    pub async fn run(self) -> Result<(), crate::error::Error> {
         loop {
             let (stream, peer) = self.listener.accept().await?;
             info!(peer = %peer, "New RTSP connection");

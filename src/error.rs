@@ -1,25 +1,31 @@
 #[derive(Debug, thiserror::Error)]
-pub enum AirPlayError {
-    #[error("mDNS registration failed: {0}")]
-    MdnsRegistration(String),
+pub enum Error {
+    #[error("mDNS: {0}")]
+    Mdns(String),
 
-    #[error("RTSP error: {0}")]
+    #[error("RTSP: {0}")]
     Rtsp(String),
 
-    #[error("pairing failed: {0}")]
+    #[error("pairing: {0}")]
     Pairing(String),
 
-    #[error("FairPlay setup failed: {0}")]
+    #[error("FairPlay: {0}")]
     FairPlay(String),
 
-    #[error("stream error: {0}")]
+    #[error("stream: {0}")]
     Stream(String),
 
-    #[error("connection closed by peer")]
-    ConnectionClosed,
+    #[error("recording: {0}")]
+    Recording(String),
 
-    #[error("invalid request: {0}")]
-    InvalidRequest(String),
+    #[error("idevice: {0}")]
+    IDevice(String),
+
+    #[error("display: {0}")]
+    Display(String),
+
+    #[error("connection closed")]
+    ConnectionClosed,
 
     #[error(transparent)]
     Io(#[from] std::io::Error),

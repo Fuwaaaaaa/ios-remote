@@ -5,7 +5,8 @@
       "Bash(gh repo:*)",
       "Bash(cargo init:*)",
       "Bash(cargo check:*)",
-      "Bash(cargo build:*)"
+      "Bash(cargo build:*)",
+      "Bash(cargo run:*)"
     ]
   }
 }

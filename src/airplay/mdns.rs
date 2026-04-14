@@ -1,4 +1,4 @@
-use crate::error::AirPlayError;
+use crate::error::Error;
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use tracing::info;
 
@@ -13,9 +13,9 @@ pub struct MdnsAdvertiser {
 }
 
 impl MdnsAdvertiser {
-    pub fn new(name: &str, port: u16) -> Result<Self, AirPlayError> {
+    pub fn new(name: &str, port: u16) -> Result<Self, Error> {
         let daemon =
-            ServiceDaemon::new().map_err(|e| AirPlayError::MdnsRegistration(e.to_string()))?;
+            ServiceDaemon::new().map_err(|e| Error::Mdns(e.to_string()))?;
 
         let device_id = "AA:BB:CC:DD:EE:FF";
         let instance_name = format!("{}@{}", device_id, name);
@@ -39,7 +39,7 @@ impl MdnsAdvertiser {
             port,
             &properties[..],
         )
-        .map_err(|e| AirPlayError::MdnsRegistration(e.to_string()))?;
+        .map_err(|e| Error::Mdns(e.to_string()))?;
 
         Ok(Self { daemon, service })
     }

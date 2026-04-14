@@ -3,7 +3,7 @@ name = "ios-remote"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "AirPlay screen mirroring receiver for Windows, written in Rust"
+description = "Full-featured AirPlay mirroring receiver + iPhone integration for Windows"
 
 [dependencies]
 # Async runtime
@@ -27,14 +27,28 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8"] }
 rand = "0.8"
 
-# Serialization (binary plist for AirPlay)
+# Serialization
 plist = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 # H.264 decode
 openh264 = "0.6"
 
 # Window / rendering
 minifb = "0.28"
+
+# Image processing (screenshot, OCR prep, notification capture)
+image = "0.25"
+
+# MP4 recording
+mp4 = "0.14"
+
+# idevice — iPhone USB communication (AFC, syslog, device info)
+# idevice = "0.1"  # TODO: uncomment when testing USB features
+
+# OCR (tesseract bindings)
+# tesseract = "0.14"  # TODO: uncomment when OCR feature is needed
 
 # Logging
 tracing = "0.1"
@@ -43,3 +57,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Error handling
 thiserror = "2"
 anyhow = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Timestamps
+chrono = "0.4"
