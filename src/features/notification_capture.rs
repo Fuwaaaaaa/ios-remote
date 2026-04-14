@@ -28,7 +28,7 @@ pub async fn run(bus: FrameBus) {
 
                         let dir = "notifications";
                         let _ = std::fs::create_dir_all(dir);
-                        let filename = format!(
+                        let _filename = format!(
                             "{}/notif_{}.png",
                             dir,
                             Local::now().format("%Y%m%d_%H%M%S_%3f")

@@ -1,13 +1,17 @@
 pub mod crypto;
 pub mod display;
+pub mod event;
 pub mod info;
 pub mod mdns;
+pub mod ntp;
 pub mod pairing;
 pub mod rtsp;
 pub mod stream;
 
 use crate::features::FrameBus;
+use event::EventServer;
 use mdns::MdnsAdvertiser;
+use ntp::NtpServer;
 use rtsp::RtspServer;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
@@ -15,7 +19,6 @@ use tokio::signal;
 use tokio::sync::Mutex;
 use tracing::info;
 
-/// Configuration from CLI arguments.
 pub struct ReceiverConfig {
     pub name: String,
     pub port: u16,
@@ -25,13 +28,12 @@ pub struct ReceiverConfig {
     pub rtmp_url: Option<String>,
 }
 
-/// Shared state across RTSP connections.
 pub struct SessionState {
     pub keypair: ed25519_dalek::SigningKey,
     pub session_key: Option<[u8; 32]>,
     pub video_data_port: u16,
     pub event_port: u16,
-    /// Bus for distributing decoded frames to all consumers.
+    pub ntp_port: u16,
     pub frame_bus: FrameBus,
 }
 
@@ -43,6 +45,7 @@ impl SessionState {
             session_key: None,
             video_data_port: 7100,
             event_port: 7200,
+            ntp_port: 7010,
             frame_bus,
         }
     }
@@ -50,7 +53,6 @@ impl SessionState {
 
 pub type SharedState = Arc<Mutex<SessionState>>;
 
-/// Top-level AirPlay receiver with all features.
 pub struct AirPlayReceiver {
     config: ReceiverConfig,
 }
@@ -70,15 +72,29 @@ impl AirPlayReceiver {
             "Starting ios-remote"
         );
 
-        // Frame bus: decoded frames are broadcast to all consumers
-        // (display, recorder, screenshot, OBS, RTMP, AI, etc.)
         let frame_bus = FrameBus::new();
         let state: SharedState = Arc::new(Mutex::new(SessionState::new(frame_bus.clone())));
 
         // ─── mDNS ────────────────────────────────────────────────
         let advertiser = MdnsAdvertiser::new(&self.config.name, self.config.port)?;
-        let mdns_handle = tokio::spawn(async move {
-            advertiser.run().await;
+        tokio::spawn(async move { advertiser.run().await });
+
+        // ─── NTP time sync ───────────────────────────────────────
+        let ntp_port = state.lock().await.ntp_port;
+        let ntp = NtpServer::new(ntp_port);
+        tokio::spawn(async move {
+            if let Err(e) = ntp.run().await {
+                tracing::error!(error = %e, "NTP server error");
+            }
+        });
+
+        // ─── Event channel ───────────────────────────────────────
+        let event_port = state.lock().await.event_port;
+        let event = EventServer::new(event_port);
+        tokio::spawn(async move {
+            if let Err(e) = event.run().await {
+                tracing::error!(error = %e, "Event server error");
+            }
         });
 
         // ─── RTSP server ─────────────────────────────────────────
@@ -87,7 +103,7 @@ impl AirPlayReceiver {
             state.clone(),
         )
         .await?;
-        let rtsp_handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             if let Err(e) = rtsp.run().await {
                 tracing::error!(error = %e, "RTSP server error");
             }
@@ -96,55 +112,64 @@ impl AirPlayReceiver {
         // ─── Video stream receiver ───────────────────────────────
         let video_port = state.lock().await.video_data_port;
         let stream_state = state.clone();
-        let video_handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             if let Err(e) = stream::listen_video(video_port, stream_state).await {
                 tracing::error!(error = %e, "Video stream error");
             }
         });
 
-        // ─── Feature consumers (each subscribes to frame_bus) ────
-
-        // Display window (runs on OS thread, not tokio)
+        // ─── Display window ─────────────────────────────────────
         let display_bus = frame_bus.clone();
         let pip = self.config.pip_mode;
         let display_handle = std::thread::spawn(move || {
             display::run_display(display_bus.subscribe(), pip);
         });
 
-        // Recording
+        // ─── Recording ──────────────────────────────────────────
         if self.config.record {
-            let rec_bus = frame_bus.clone();
+            let rx = frame_bus.subscribe();
             tokio::spawn(async move {
-                crate::features::recording::run(rec_bus.subscribe()).await;
+                crate::features::recording::run(rx).await;
             });
             info!("Recording enabled → ./recordings/");
         }
 
-        // Screenshot listener (Ctrl+S hotkey in display window)
-        let ss_bus = frame_bus.clone();
+        // ─── Notification capture ────────────────────────────────
+        let notif_bus = frame_bus.clone();
         tokio::spawn(async move {
-            crate::features::screenshot::run(ss_bus.subscribe()).await;
+            crate::features::notification_capture::run(notif_bus).await;
         });
 
-        // OBS virtual camera
+        // ─── OBS virtual camera ──────────────────────────────────
         if self.config.obs_virtual_camera {
-            info!("OBS virtual camera: ready (pipe: \\\\.\\pipe\\ios-remote-cam)");
+            let rx = frame_bus.subscribe();
+            tokio::spawn(async move {
+                crate::features::streaming::obs_virtual_camera(rx).await;
+            });
         }
 
-        // RTMP streaming
+        // ─── RTMP streaming ─────────────────────────────────────
         if let Some(ref url) = self.config.rtmp_url {
-            info!(url = %url, "RTMP streaming: ready");
+            let rx = frame_bus.subscribe();
+            let url = url.clone();
+            tokio::spawn(async move {
+                crate::features::streaming::rtmp_stream(rx, url).await;
+            });
         }
 
-        info!("All systems ready. Waiting for iPhone. Ctrl+C to stop.");
+        info!(
+            "All systems ready:\n  \
+             RTSP     :7000\n  \
+             NTP      :7010\n  \
+             Video    :7100\n  \
+             Event    :7200\n  \
+             Hotkeys  : S=screenshot, Q/Esc=quit\n  \
+             Waiting for iPhone..."
+        );
+
         signal::ctrl_c().await?;
         info!("Shutting down...");
-
-        mdns_handle.abort();
-        rtsp_handle.abort();
-        video_handle.abort();
         let _ = display_handle.join();
-
         Ok(())
     }
 }

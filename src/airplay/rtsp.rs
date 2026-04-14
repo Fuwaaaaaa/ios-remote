@@ -266,7 +266,7 @@ impl Connection {
         let mut dict = plist::Dictionary::new();
         dict.insert("eventPort".to_owned(), plist::Value::Integer(s.event_port.into()));
         dict.insert("dataPort".to_owned(), plist::Value::Integer(s.video_data_port.into()));
-        dict.insert("timingPort".to_owned(), plist::Value::Integer(0.into()));
+        dict.insert("timingPort".to_owned(), plist::Value::Integer(s.ntp_port.into()));
 
         let root = plist::Value::Dictionary(dict);
         let mut body = Vec::new();

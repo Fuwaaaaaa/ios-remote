@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod airplay;
 mod error;
 mod features;

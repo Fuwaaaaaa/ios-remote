@@ -5,6 +5,10 @@ edition = "2024"
 license = "MIT"
 description = "Full-featured AirPlay mirroring receiver + iPhone integration for Windows"
 
+[features]
+default = []
+vr = []  # Enable OpenVR overlay support (requires SteamVR)
+
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }

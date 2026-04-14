@@ -23,7 +23,7 @@ pub enum LogLevel {
 /// Stream iPhone syslog entries in real-time via syslog_relay service.
 ///
 /// Useful for debugging iOS apps without Xcode.
-pub async fn stream_syslog(tx: broadcast::Sender<SyslogEntry>) -> Result<(), String> {
+pub async fn stream_syslog(_tx: broadcast::Sender<SyslogEntry>) -> Result<(), String> {
     info!("Syslog relay: waiting for USB device connection");
     // TODO: Implement with idevice crate
     Err("idevice syslog relay not yet enabled".to_string())

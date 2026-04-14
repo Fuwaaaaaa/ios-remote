@@ -14,16 +14,16 @@ pub struct FileEntry {
 ///
 /// AFC gives access to app documents, media folders, and crash logs.
 /// General filesystem access is not available without jailbreak.
-pub async fn list_files(path: &str) -> Result<Vec<FileEntry>, String> {
+pub async fn list_files(_path: &str) -> Result<Vec<FileEntry>, String> {
     Err("idevice AFC not yet enabled".to_string())
 }
 
 /// Download a file from iPhone to local path.
-pub async fn download_file(remote_path: &str, local_path: &PathBuf) -> Result<(), String> {
+pub async fn download_file(_remote_path: &str, _local_path: &PathBuf) -> Result<(), String> {
     Err("idevice AFC not yet enabled".to_string())
 }
 
 /// Upload a file from local path to iPhone.
-pub async fn upload_file(local_path: &PathBuf, remote_path: &str) -> Result<(), String> {
+pub async fn upload_file(_local_path: &PathBuf, _remote_path: &str) -> Result<(), String> {
     Err("idevice AFC not yet enabled".to_string())
 }

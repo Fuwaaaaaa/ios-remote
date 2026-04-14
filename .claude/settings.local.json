@@ -6,7 +6,9 @@
       "Bash(cargo init:*)",
       "Bash(cargo check:*)",
       "Bash(cargo build:*)",
-      "Bash(cargo run:*)"
+      "Bash(cargo run:*)",
+      "Bash(cargo fix:*)",
+      "Bash(find src:*)"
     ]
   }
 }
