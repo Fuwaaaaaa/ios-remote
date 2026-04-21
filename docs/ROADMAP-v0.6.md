@@ -20,19 +20,34 @@ no-op with `unimplemented!()` behind its feature gate. Remaining work:
 
 ### Session replay decode
 Today `SessionPlayer` (src/features/session_replay.rs) only exposes
-`nalu(index)` and `seek_proportional()` — there is no `play()` method, and
-neither `openh264` nor `ffmpeg` is in Cargo.toml. Work breaks into three
-layers, none of which are started:
+`nalu(index)` and `seek_proportional()` — there is no `play()` method.
 
-1. **Decoder selection (design decision, do first)** — compare `openh264`
-   crate (pure Rust bindings, Cisco license surface) vs an `ffmpeg`
-   subprocess (no build-time C deps, harder to pipe RGBA back). Write the
-   choice + rationale into this file before coding.
-2. **`SessionPlayer::play()`** — publish decoded RGBA to a FrameBus at
-   original timing, with `seek(ts)` honoring bookmarks.
-3. **REST + UI** — `POST /api/replay/load {path}`, `/play`, `/pause`,
-   `/seek {ts_us}`; Web Dashboard `/replay` page with play / pause / scrub /
-   bookmark list.
+**Decoder decision: ffmpeg subprocess** (decided 2026-04-21).
+
+| Axis | ffmpeg subprocess | `openh264` crate |
+|---|---|---|
+| Runtime dependency | Already documented in README (RTMP line 281); end-users already install it. **No new dep.** | Would add a new build+runtime dep. Cisco binary royalty shipped via their hosted blob. |
+| Build surface | Zero new Rust deps; zero new C deps in the cargo build. | New crate + either vendored C lib (build cost) or dynamic load (runtime cost). |
+| Existing pattern | `src/features/streaming.rs:35-86` already spawns ffmpeg with `-f h264 -i pipe:0` and pipes NALUs in. **Paste-and-adapt**. | No precedent in this codebase; would introduce a decoder abstraction. |
+| Output plumbing | Read raw RGBA frames from stdout (`-f rawvideo -pix_fmt rgba pipe:1`). Slight framing complexity (fixed `width*height*4` chunks). | Returns decoded frames directly via Rust API — cleaner on paper. |
+| License | ffmpeg install is the user's problem; we call it as a tool, no linking. | BSD-2 crate + Cisco blob; need a NOTICE line for redistributions. |
+| Performance | Fine for playback (~60fps RGBA pipe is bandwidth-bound, not CPU-bound). | Fine; possibly faster for short clips (no process startup). |
+
+The deciding factor is that ffmpeg is already a paid cost. Adding
+`openh264` would double the h.264 decode surface area for no gain on the
+Windows-only, playback-only workload. The stdout rawvideo read is the
+only real downside and it's a ~30-line chunk reader.
+
+**Implementation order:**
+
+1. **`SessionPlayer::play()`** — mirror `streaming.rs:rtmp_stream` shape:
+   spawn ffmpeg with `-f h264 -i pipe:0 -f rawvideo -pix_fmt rgba pipe:1`,
+   feed `nalu(i)` frames into stdin on a writer task, read fixed-size
+   RGBA chunks from stdout on a reader task, publish to `FrameBus` with
+   original timing. `seek(ts)` honors bookmarks.
+2. **REST + UI** — `POST /api/replay/load {path}`, `/play`, `/pause`,
+   `/seek {ts_us}`; Web Dashboard `/replay` page with play / pause /
+   scrub / bookmark list.
 
 Acceptance: loading a SessionRecorder output plays back in the display
 window at ~the original frame rate.
