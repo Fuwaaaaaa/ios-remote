@@ -11,10 +11,11 @@ mod usb;
 
 use clap::Parser;
 use features::FrameBus;
+use std::net::{IpAddr, SocketAddr};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
-#[command(name = "ios-remote", about = "iPhone screen mirroring via USB Type-C")]
+#[command(name = "ios-remote", about = "iPhone screen mirroring via USB Type-C (Windows only)")]
 struct Cli {
     /// Display window name
     #[arg(short, long, default_value = "ios-remote")]
@@ -31,6 +32,21 @@ struct Cli {
     /// PiP mode (always on top)
     #[arg(long)]
     pip: bool,
+
+    /// Expose the Web Dashboard / API on 0.0.0.0 (LAN). An API token is required
+    /// for all /api/* requests regardless of this flag.
+    #[arg(long)]
+    lan: bool,
+
+    /// Override the bind address (e.g. 127.0.0.1 or 192.168.1.10). When --lan is
+    /// set, this flag is ignored and 0.0.0.0 is used.
+    #[arg(long)]
+    bind: Option<IpAddr>,
+
+    /// Override API token (also accepted via env IOS_REMOTE_API_TOKEN). If unset,
+    /// the token from config is used; if config has none, one is generated.
+    #[arg(long)]
+    token: Option<String>,
 }
 
 #[tokio::main]
@@ -50,17 +66,57 @@ async fn main() -> anyhow::Result<()> {
         env!("CARGO_PKG_VERSION")
     );
 
-    // Frame bus: decoded frames broadcast to all consumers
+    // ── Config + token ──────────────────────────────────────────────────────
+    let mut app_config = config::AppConfig::load();
+    if cli.lan {
+        app_config.network.lan_access = true;
+    }
+    let api_token = cli
+        .token
+        .clone()
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| app_config.resolve_api_token());
+
+    let bind_ip: IpAddr = if app_config.network.lan_access {
+        IpAddr::from([0, 0, 0, 0])
+    } else if let Some(ip) = cli.bind {
+        ip
+    } else {
+        app_config
+            .network
+            .bind_address
+            .parse()
+            .unwrap_or_else(|_| IpAddr::from([127, 0, 0, 1]))
+    };
+
+    let web_addr = SocketAddr::new(bind_ip, cli.web_port);
+    tracing::info!(
+        "API token (Bearer): {token}",
+        token = &api_token
+    );
+    if app_config.network.lan_access {
+        tracing::warn!(
+            bind = %web_addr,
+            "LAN access enabled — the dashboard is reachable from other hosts. Keep the token secret."
+        );
+    } else {
+        tracing::info!(
+            bind = %web_addr,
+            "Local-only mode — use --lan to expose on all interfaces."
+        );
+    }
+
+    // ── Frame bus: decoded frames broadcast to all consumers ────────────────
     let frame_bus = FrameBus::new();
 
-    // Display window (OS thread)
+    // ── Display window (OS thread) ──────────────────────────────────────────
     let display_bus = frame_bus.clone();
     let pip = cli.pip;
     let display_handle = std::thread::spawn(move || {
         features::display::run_display(display_bus.subscribe(), pip);
     });
 
-    // Recording
+    // ── Recording ───────────────────────────────────────────────────────────
     if cli.record {
         let rx = frame_bus.subscribe();
         tokio::spawn(async move {
@@ -69,24 +125,43 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Recording enabled → ./recordings/");
     }
 
-    // Web dashboard
+    // ── Web dashboard ───────────────────────────────────────────────────────
     let web_bus = frame_bus.clone();
-    let web_port = cli.web_port;
+    let web_token = api_token.clone();
+    let web_config = app_config.clone();
     tokio::spawn(async move {
         let api_state = std::sync::Arc::new(ui::api::ApiState {
             frame_bus: web_bus,
-            config: std::sync::Arc::new(tokio::sync::Mutex::new(config::AppConfig::default())),
-            history: std::sync::Arc::new(tokio::sync::Mutex::new(config::ConnectionHistory::default())),
+            config: std::sync::Arc::new(tokio::sync::Mutex::new(web_config)),
+            history: std::sync::Arc::new(tokio::sync::Mutex::new(
+                config::ConnectionHistory::default(),
+            )),
             stats: std::sync::Arc::new(tokio::sync::Mutex::new(ui::api::StreamStats::default())),
+            api_token: web_token,
         });
-        let app = ui::api::router(api_state)
-            .route("/", axum::routing::get(ui::web::dashboard));
-        let listener = tokio::net::TcpListener::bind(("0.0.0.0", web_port)).await.unwrap();
-        tracing::info!(port = web_port, "Web dashboard: http://localhost:{}", web_port);
-        let _ = axum::serve(listener, app).await;
+        let app = ui::api::router(api_state.clone())
+            .route(
+                "/",
+                axum::routing::get(ui::web::dashboard).with_state(api_state),
+            );
+        match tokio::net::TcpListener::bind(web_addr).await {
+            Ok(listener) => {
+                tracing::info!(addr = %web_addr, "Web dashboard: http://{}", web_addr);
+                if let Err(e) = axum::serve(listener, app).await {
+                    tracing::error!(error = %e, "Web server stopped with error");
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    addr = %web_addr,
+                    "Failed to bind Web dashboard — is the port already in use?"
+                );
+            }
+        }
     });
 
-    // USB connection (main task)
+    // ── USB connection (main task) ──────────────────────────────────────────
     let receiver = usb::UsbReceiver::new(frame_bus);
     receiver.run().await?;
 

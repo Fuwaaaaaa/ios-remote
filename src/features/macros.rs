@@ -110,8 +110,15 @@ pub fn list_macros() -> Vec<String> {
         return vec![];
     }
 
-    fs::read_dir(dir)
-        .unwrap_or_else(|_| fs::read_dir(".").unwrap())
+    let entries = match fs::read_dir(dir) {
+        Ok(it) => it,
+        Err(e) => {
+            tracing::warn!(error = %e, dir = %dir.display(), "list_macros: read_dir failed");
+            return vec![];
+        }
+    };
+
+    entries
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let path = entry.path();

@@ -1,11 +1,18 @@
-use axum::response::Html;
+use crate::ui::api::ApiState;
+use axum::{extract::State, response::Html};
+use std::sync::Arc;
 
-/// Serve the embedded web dashboard.
-///
-/// A single-page app that shows real-time status, controls, and settings.
-/// Served at http://localhost:8080/
-pub async fn dashboard() -> Html<&'static str> {
-    Html(DASHBOARD_HTML)
+/// Serve the embedded web dashboard with the current API token baked into the
+/// page so same-origin fetch calls can attach it as a Bearer header.
+pub async fn dashboard(State(state): State<Arc<ApiState>>) -> Html<String> {
+    // JSON-escape the token defensively; our generator emits alphanumerics + `-_`
+    // so this is belt-and-suspenders.
+    let token_js = serde_json::to_string(&state.api_token)
+        .unwrap_or_else(|_| "\"\"".to_string());
+    let bootstrap = format!(
+        "<script>window.__IOS_REMOTE_TOKEN={token_js};</script>"
+    );
+    Html(DASHBOARD_HTML.replace("<!--BOOTSTRAP-->", &bootstrap))
 }
 
 const DASHBOARD_HTML: &str = r#"<!DOCTYPE html>
@@ -13,6 +20,7 @@ const DASHBOARD_HTML: &str = r#"<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <title>ios-remote Dashboard</title>
+<!--BOOTSTRAP-->
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; }
@@ -80,6 +88,13 @@ const DASHBOARD_HTML: &str = r#"<!DOCTYPE html>
 
 <script>
 const API = '';
+const TOKEN = window.__IOS_REMOTE_TOKEN || '';
+const AUTH_HEADERS = TOKEN ? {'Authorization': `Bearer ${TOKEN}`} : {};
+async function api(path, opts) {
+  opts = opts || {};
+  opts.headers = Object.assign({}, opts.headers || {}, AUTH_HEADERS);
+  return fetch(`${API}${path}`, opts);
+}
 
 function log(msg) {
   const el = document.getElementById('log');
@@ -90,7 +105,7 @@ function log(msg) {
 
 async function fetchStats() {
   try {
-    const r = await fetch(`${API}/api/stats`);
+    const r = await api(`/api/stats`);
     const s = await r.json();
     document.getElementById('fps').textContent = s.fps?.toFixed(1) || '--';
     document.getElementById('frames').textContent = s.frames_received || 0;
@@ -109,38 +124,38 @@ async function fetchStats() {
 
 async function screenshot() {
   log('Taking screenshot...');
-  const r = await fetch(`${API}/api/screenshot`, {method:'POST'});
+  const r = await api(`/api/screenshot`, {method:'POST'});
   const j = await r.json();
   log(j.path ? `Saved: ${j.path}` : `Error: ${j.error || 'no frame'}`);
 }
 
 async function startRec() {
-  const r = await fetch(`${API}/api/recording/start`, {method:'POST'});
+  const r = await api(`/api/recording/start`, {method:'POST'});
   log('Recording started');
 }
 
 async function stopRec() {
-  const r = await fetch(`${API}/api/recording/stop`, {method:'POST'});
+  const r = await api(`/api/recording/stop`, {method:'POST'});
   log('Recording stopped');
 }
 
 async function runOcr() {
   log('Running OCR...');
-  const r = await fetch(`${API}/api/ocr`, {method:'POST'});
+  const r = await api(`/api/ocr`, {method:'POST'});
   const j = await r.json();
   log(j.text ? `Text: ${j.text.substring(0,200)}` : `Error: ${j.error}`);
 }
 
 async function aiDescribe() {
   log('AI analyzing screen...');
-  const r = await fetch(`${API}/api/ai/describe`, {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  const r = await api(`/api/ai/describe`, {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
   const j = await r.json();
   log(j.description ? `AI: ${j.description.substring(0,300)}` : `Error: ${j.error}`);
 }
 
 async function loadHistory() {
   try {
-    const r = await fetch(`${API}/api/history`);
+    const r = await api(`/api/history`);
     const h = await r.json();
     const el = document.getElementById('history');
     if (!h.records?.length) { el.textContent = 'No connections yet.'; return; }

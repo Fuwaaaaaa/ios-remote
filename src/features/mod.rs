@@ -88,9 +88,19 @@ impl FrameBus {
     }
     pub fn publish(&self, frame: Frame) {
         let frame = Arc::new(frame);
-        { let mut l = self.latest.lock().unwrap(); *l = Some(frame.clone()); }
+        {
+            // Poisoned locks recover by ignoring the poison — our state is a simple
+            // Arc swap and the previous holder panicking cannot leave it inconsistent.
+            let mut l = self.latest.lock().unwrap_or_else(|e| e.into_inner());
+            *l = Some(frame.clone());
+        }
         let _ = self.sender.send(frame);
     }
     pub fn subscribe(&self) -> broadcast::Receiver<Arc<Frame>> { self.sender.subscribe() }
-    pub fn latest_frame(&self) -> Option<Arc<Frame>> { self.latest.lock().unwrap().clone() }
+    pub fn latest_frame(&self) -> Option<Arc<Frame>> {
+        self.latest
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
 }

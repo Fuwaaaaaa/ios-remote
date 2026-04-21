@@ -45,9 +45,19 @@ pub async fn serve_mjpeg(
         }
     }));
 
-    let listener = TcpListener::bind(("0.0.0.0", port)).await.unwrap();
-    info!(port, "MJPEG screen sharing: http://localhost:{}/stream", port);
-    let _ = axum::serve(listener, app).await;
+    match TcpListener::bind(("127.0.0.1", port)).await {
+        Ok(listener) => {
+            info!(port, "MJPEG screen sharing: http://localhost:{}/stream", port);
+            let _ = axum::serve(listener, app).await;
+        }
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                port,
+                "MJPEG share failed to bind — skipping this feature"
+            );
+        }
+    }
 }
 
 fn encode_jpeg(frame: &Frame) -> Result<Vec<u8>, String> {

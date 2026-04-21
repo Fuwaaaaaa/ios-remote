@@ -2,15 +2,16 @@ use crate::config::{AppConfig, ConnectionHistory};
 use crate::features::{screenshot, FrameBus};
 use axum::{
     extract::State,
-    http::StatusCode,
-    response::Json,
+    http::{Request, StatusCode},
+    middleware::{self, Next},
+    response::{Json, Response},
     routing::{get, post},
     Router,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Shared API state.
 pub struct ApiState {
@@ -18,6 +19,9 @@ pub struct ApiState {
     pub config: Arc<Mutex<AppConfig>>,
     pub history: Arc<Mutex<ConnectionHistory>>,
     pub stats: Arc<Mutex<StreamStats>>,
+    /// Bearer token required on every /api/* request. Empty string disables auth
+    /// (not recommended; used only for internal tests).
+    pub api_token: String,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -31,9 +35,10 @@ pub struct StreamStats {
     pub bitrate_kbps: f64,
 }
 
-/// Build the REST API router.
+/// Build the REST API router. All /api/* routes are protected by a bearer
+/// token middleware derived from `state.api_token`.
 pub fn router(state: Arc<ApiState>) -> Router {
-    Router::new()
+    let protected = Router::new()
         // Status
         .route("/api/status", get(get_status))
         .route("/api/stats", get(get_stats))
@@ -53,7 +58,60 @@ pub fn router(state: Arc<ApiState>) -> Router {
         // Macros
         .route("/api/macros", get(list_macros))
         .route("/api/macros/run", post(run_macro))
-        .with_state(state)
+        .route_layer(middleware::from_fn_with_state(state.clone(), require_bearer))
+        .with_state(state);
+
+    protected
+}
+
+/// Axum middleware enforcing `Authorization: Bearer <token>` on /api/* routes.
+/// Accepts the token via `?token=<t>` as a fallback for QR-code/URL embedding,
+/// but discourages it in docs. Unauthorized requests get 401.
+async fn require_bearer(
+    State(state): State<Arc<ApiState>>,
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    if state.api_token.is_empty() {
+        return Ok(next.run(req).await);
+    }
+
+    let header_ok = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .map(|t| constant_time_eq(t.as_bytes(), state.api_token.as_bytes()))
+        .unwrap_or(false);
+
+    let query_ok = req
+        .uri()
+        .query()
+        .and_then(|q| {
+            q.split('&')
+                .find_map(|p| p.strip_prefix("token="))
+        })
+        .map(|t| constant_time_eq(t.as_bytes(), state.api_token.as_bytes()))
+        .unwrap_or(false);
+
+    if header_ok || query_ok {
+        Ok(next.run(req).await)
+    } else {
+        warn!(path = %req.uri().path(), "Unauthorized API request");
+        Err(StatusCode::UNAUTHORIZED)
+    }
+}
+
+/// Constant-time byte slice comparison to avoid timing attacks on the token.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 // ─── Handlers ────────────────────────────────────────────────────────────────

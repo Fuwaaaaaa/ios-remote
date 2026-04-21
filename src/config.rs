@@ -58,8 +58,14 @@ pub struct RecordingSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkSettings {
-    /// Bind address for all servers.
+    /// Bind address for HTTP servers (Web Dashboard, MJPEG). Default 127.0.0.1.
+    /// Use `lan_access = true` (or CLI `--lan`) to switch to 0.0.0.0.
     pub bind_address: String,
+    /// When true, forces bind_address to 0.0.0.0 and requires an API token.
+    pub lan_access: bool,
+    /// Bearer token required on every /api/* request. Auto-generated on first
+    /// launch if None. Overridden by env var `IOS_REMOTE_API_TOKEN`.
+    pub api_token: Option<String>,
     /// RTMP streaming URL (empty = disabled).
     pub rtmp_url: String,
 }
@@ -97,7 +103,9 @@ impl Default for AppConfig {
                 max_duration_secs: 0,
             },
             network: NetworkSettings {
-                bind_address: "0.0.0.0".to_string(),
+                bind_address: "127.0.0.1".to_string(),
+                lan_access: false,
+                api_token: None,
                 rtmp_url: String::new(),
             },
             features: FeatureToggles {
@@ -142,6 +150,51 @@ impl AppConfig {
             let _ = fs::write(CONFIG_FILE, content);
         }
     }
+
+    /// Ensure an API token exists. Preference order:
+    ///   1. `IOS_REMOTE_API_TOKEN` environment variable
+    ///   2. `config.network.api_token` from disk
+    ///   3. Freshly generated 32-byte URL-safe token (persisted to disk)
+    ///
+    /// Returns the resolved token. Call this once on startup.
+    pub fn resolve_api_token(&mut self) -> String {
+        if let Ok(env_token) = std::env::var("IOS_REMOTE_API_TOKEN") {
+            let trimmed = env_token.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+        if let Some(existing) = &self.network.api_token {
+            if !existing.is_empty() {
+                return existing.clone();
+            }
+        }
+        let token = generate_token();
+        self.network.api_token = Some(token.clone());
+        self.save();
+        token
+    }
+}
+
+/// Generate a 32-byte URL-safe random token.
+fn generate_token() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 24];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    // URL-safe base64 without padding (0-9A-Za-z-_).
+    const ALPHABET: &[u8] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity(32);
+    let mut i = 0;
+    while i + 3 <= bytes.len() {
+        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8) | (bytes[i + 2] as u32);
+        out.push(ALPHABET[((n >> 18) & 0x3f) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 0x3f) as usize] as char);
+        out.push(ALPHABET[((n >> 6) & 0x3f) as usize] as char);
+        out.push(ALPHABET[(n & 0x3f) as usize] as char);
+        i += 3;
+    }
+    out
 }
 
 // ─── Connection History ─────────────────────────────────────────────────────

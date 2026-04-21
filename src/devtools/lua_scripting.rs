@@ -34,25 +34,32 @@ pub mod engine {
     impl LuaEngine {
         pub fn new() -> Result<Self, String> {
             let lua = Lua::new();
+            let to_err = |e: mlua::Error| format!("Lua init failed: {e}");
 
             // Register screen API
-            lua.globals().set("screen", lua.create_table().unwrap()).unwrap();
-            lua.globals().set("clipboard", lua.create_table().unwrap()).unwrap();
+            let screen_tbl = lua.create_table().map_err(to_err)?;
+            let clipboard_tbl = lua.create_table().map_err(to_err)?;
+            lua.globals().set("screen", screen_tbl).map_err(to_err)?;
+            lua.globals().set("clipboard", clipboard_tbl).map_err(to_err)?;
 
             // screen.wait(ms)
-            let wait_fn = lua.create_function(|_, ms: u64| {
-                std::thread::sleep(std::time::Duration::from_millis(ms));
-                Ok(())
-            }).unwrap();
-            let screen: LuaTable = lua.globals().get("screen").unwrap();
-            screen.set("wait", wait_fn).unwrap();
+            let wait_fn = lua
+                .create_function(|_, ms: u64| {
+                    std::thread::sleep(std::time::Duration::from_millis(ms));
+                    Ok(())
+                })
+                .map_err(to_err)?;
+            let screen: LuaTable = lua.globals().get("screen").map_err(to_err)?;
+            screen.set("wait", wait_fn).map_err(to_err)?;
 
             // screen.log(msg)
-            let log_fn = lua.create_function(|_, msg: String| {
-                info!(lua = true, msg = %msg, "Lua script");
-                Ok(())
-            }).unwrap();
-            screen.set("log", log_fn).unwrap();
+            let log_fn = lua
+                .create_function(|_, msg: String| {
+                    info!(lua = true, msg = %msg, "Lua script");
+                    Ok(())
+                })
+                .map_err(to_err)?;
+            screen.set("log", log_fn).map_err(to_err)?;
 
             info!("Lua scripting engine initialized (Lua 5.4)");
             Ok(Self { lua })
