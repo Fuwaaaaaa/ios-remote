@@ -1,4 +1,5 @@
 use crate::config::{AppConfig, ConnectionHistory};
+use crate::features::recording::RecordingController;
 use crate::features::{screenshot, FrameBus};
 use axum::{
     extract::State,
@@ -22,6 +23,9 @@ pub struct ApiState {
     /// Bearer token required on every /api/* request. Empty string disables auth
     /// (not recommended; used only for internal tests).
     pub api_token: String,
+    /// Recording lifecycle handle — shared with the recording task spawned by
+    /// `RecordingController::start()`.
+    pub recorder: RecordingController,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -145,13 +149,27 @@ async fn take_screenshot(State(state): State<Arc<ApiState>>) -> Result<Json<serd
     }
 }
 
-async fn start_recording() -> Json<serde_json::Value> {
-    // TODO: trigger recording via FrameBus
-    Json(serde_json::json!({ "status": "recording_started" }))
+async fn start_recording(State(state): State<Arc<ApiState>>) -> Json<serde_json::Value> {
+    match state.recorder.start() {
+        Ok(path) => Json(serde_json::json!({
+            "status": "recording_started",
+            "path": path.display().to_string(),
+        })),
+        Err(e) => Json(serde_json::json!({ "status": "error", "error": e })),
+    }
 }
 
-async fn stop_recording() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "status": "recording_stopped" }))
+async fn stop_recording(State(state): State<Arc<ApiState>>) -> Json<serde_json::Value> {
+    match state.recorder.stop() {
+        Some(path) => Json(serde_json::json!({
+            "status": "recording_stopped",
+            "path": path.display().to_string(),
+        })),
+        None => Json(serde_json::json!({
+            "status": "idle",
+            "error": "no recording in progress",
+        })),
+    }
 }
 
 async fn get_config(State(state): State<Arc<ApiState>>) -> Json<AppConfig> {

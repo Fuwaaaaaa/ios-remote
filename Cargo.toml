@@ -9,6 +9,12 @@ description = "iPhone screen mirroring & control via USB Type-C — written in R
 default = []
 vr = []
 lua = ["mlua"]
+# Stream Deck HID support. Pulls in the elgato-streamdeck crate which uses
+# hidapi; on Windows the system ships the HID stack, nothing else to install.
+stream_deck = ["elgato-streamdeck"]
+# Local Whisper transcription via whisper.cpp bindings. Requires a GGML model
+# file at runtime (see README).
+whisper = ["whisper-rs"]
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -36,3 +42,9 @@ winreg = "0.55"
 
 # Lua scripting (optional)
 mlua = { version = "0.10", features = ["lua54", "async", "vendored"], optional = true }
+
+# Stream Deck HID (optional) — enable with --features stream_deck
+elgato-streamdeck = { version = "0.8", optional = true }
+
+# Local Whisper (optional) — enable with --features whisper
+whisper-rs = { version = "0.11", optional = true }

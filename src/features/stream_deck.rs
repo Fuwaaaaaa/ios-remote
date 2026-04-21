@@ -2,7 +2,11 @@ use serde::{Deserialize, Serialize};
 
 /// Stream Deck integration: map Elgato Stream Deck buttons to actions.
 ///
-/// Connects via Stream Deck SDK WebSocket (localhost:28196).
+/// The earlier draft referenced a "Stream Deck SDK WebSocket on localhost:28196".
+/// That socket is only exposed to *plugins running inside the Stream Deck app*;
+/// third-party binaries cannot connect to it. We instead talk to the device
+/// over HID using the `elgato-streamdeck` crate, guarded by the `stream_deck`
+/// cargo feature so users who don't have the hardware avoid the dependency.
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StreamDeckButton {
@@ -35,6 +39,14 @@ impl StreamDeckIntegration {
         ]
     }
 
+    pub fn buttons(&self) -> &[StreamDeckButton] {
+        &self.buttons
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.connected
+    }
+
     /// Handle a button press by position.
     pub fn on_press(&self, position: u8) -> Option<&str> {
         self.buttons.iter()
@@ -52,4 +64,26 @@ impl StreamDeckIntegration {
         self.buttons = serde_json::from_str(&json).map_err(|e| e.to_string())?;
         Ok(())
     }
+}
+
+/// Discover the first attached Stream Deck and return an event-producing client.
+///
+/// Returns `Err("stream_deck feature not enabled")` when built without the
+/// `stream_deck` cargo feature, so callers can treat this as a soft-fail.
+#[cfg(not(feature = "stream_deck"))]
+pub fn try_open_device() -> Result<(), String> {
+    Err("stream_deck feature not enabled (build with --features stream_deck)".to_string())
+}
+
+#[cfg(feature = "stream_deck")]
+pub fn try_open_device() -> Result<elgato_streamdeck::StreamDeck, String> {
+    use elgato_streamdeck::{list_devices, new_hidapi, StreamDeck};
+    let hid = new_hidapi().map_err(|e| format!("hidapi init: {e}"))?;
+    let devices = list_devices(&hid);
+    let (kind, serial) = devices
+        .into_iter()
+        .next()
+        .ok_or_else(|| "no Stream Deck attached".to_string())?;
+    StreamDeck::connect(&hid, kind, &serial)
+        .map_err(|e| format!("connect to Stream Deck {serial}: {e}"))
 }

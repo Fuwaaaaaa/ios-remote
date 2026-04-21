@@ -129,19 +129,20 @@ async fn main() -> anyhow::Result<()> {
         features::display::run_display(display_bus.subscribe(), pip);
     });
 
-    // ── Recording ───────────────────────────────────────────────────────────
+    // ── Recording controller (shared across CLI --record and the REST API) ──
+    let recorder = features::recording::RecordingController::new(frame_bus.clone());
     if cli.record {
-        let rx = frame_bus.subscribe();
-        tokio::spawn(async move {
-            features::recording::run(rx).await;
-        });
-        tracing::info!("Recording enabled → ./recordings/");
+        match recorder.start() {
+            Ok(path) => tracing::info!(file = %path.display(), "Recording enabled → {}", path.display()),
+            Err(e) => tracing::warn!(error = %e, "Could not start recording"),
+        }
     }
 
     // ── Web dashboard ───────────────────────────────────────────────────────
     let web_bus = frame_bus.clone();
     let web_token = api_token.clone();
     let web_config = app_config.clone();
+    let web_recorder = recorder.clone();
     tokio::spawn(async move {
         let api_state = std::sync::Arc::new(ui::api::ApiState {
             frame_bus: web_bus,
@@ -151,6 +152,7 @@ async fn main() -> anyhow::Result<()> {
             )),
             stats: std::sync::Arc::new(tokio::sync::Mutex::new(ui::api::StreamStats::default())),
             api_token: web_token,
+            recorder: web_recorder,
         });
         let app = ui::api::router(api_state.clone())
             .route(
