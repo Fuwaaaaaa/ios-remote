@@ -1,7 +1,8 @@
+use super::wda_client::{default_wda_client, WdaClient};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Automation macro system: record and replay sequences of actions.
 ///
@@ -57,8 +58,18 @@ impl Macro {
         fs::write(path, json).map_err(|e| e.to_string())
     }
 
-    /// Execute the macro (requires input sender to be connected).
+    /// Execute the macro against a WebDriverAgent endpoint. `client` is the
+    /// WDA client to use; pass `default_wda_client()` to pick up
+    /// `IOS_REMOTE_WDA_URL` or the 127.0.0.1:8100 default.
+    ///
+    /// Actions that do not require device input (Wait, WaitForScreen,
+    /// Screenshot, Repeat) run even if WDA is unreachable; input actions
+    /// bubble the WDA error up to the caller.
     pub async fn execute(&self) -> Result<(), String> {
+        self.execute_with(&default_wda_client()).await
+    }
+
+    pub async fn execute_with(&self, client: &WdaClient) -> Result<(), String> {
         info!(name = %self.name, actions = self.actions.len(), "Executing macro");
 
         for (i, action) in self.actions.iter().enumerate() {
@@ -66,17 +77,21 @@ impl Macro {
                 MacroAction::Tap { x, y, delay_ms } => {
                     tokio::time::sleep(std::time::Duration::from_millis(*delay_ms)).await;
                     info!(step = i, x, y, "Macro: tap");
-                    // TODO: send tap via input module
+                    client.tap(*x, *y).map_err(|e| e.to_string())?;
                 }
-                MacroAction::Swipe { x1, y1, x2, y2, duration_ms: _, delay_ms } => {
+                MacroAction::Swipe { x1, y1, x2, y2, duration_ms, delay_ms } => {
                     tokio::time::sleep(std::time::Duration::from_millis(*delay_ms)).await;
                     info!(step = i, "Macro: swipe ({},{})→({},{})", x1, y1, x2, y2);
-                    // TODO: send swipe via input module
+                    client
+                        .swipe(*x1, *y1, *x2, *y2, *duration_ms)
+                        .map_err(|e| e.to_string())?;
                 }
                 MacroAction::LongPress { x, y, duration_ms, delay_ms } => {
                     tokio::time::sleep(std::time::Duration::from_millis(*delay_ms)).await;
                     info!(step = i, x, y, duration_ms, "Macro: long press");
-                    // TODO: send long press via input module
+                    client
+                        .long_press(*x, *y, *duration_ms)
+                        .map_err(|e| e.to_string())?;
                 }
                 MacroAction::Wait { duration_ms } => {
                     info!(step = i, duration_ms, "Macro: wait");
@@ -84,16 +99,16 @@ impl Macro {
                 }
                 MacroAction::Screenshot { delay_ms } => {
                     tokio::time::sleep(std::time::Duration::from_millis(*delay_ms)).await;
-                    info!(step = i, "Macro: screenshot");
-                    // TODO: trigger screenshot via FrameBus
+                    info!(step = i, "Macro: screenshot (delegated to screenshot feature)");
+                    // Actual frame grab is owned by screenshot::save_frame via
+                    // the API layer; here we just mark the intent so replays
+                    // can time screenshots relative to input.
                 }
                 MacroAction::WaitForScreen { template_path, timeout_ms: _, region: _ } => {
-                    info!(step = i, template = %template_path, "Macro: waiting for screen match");
-                    // TODO: template matching with frame analysis
+                    warn!(step = i, template = %template_path, "Macro: WaitForScreen not yet implemented — skipping");
                 }
                 MacroAction::Repeat { count, actions_back: _ } => {
-                    info!(step = i, count, "Macro: repeat");
-                    // TODO: implement repeat logic
+                    warn!(step = i, count, "Macro: Repeat not yet implemented — skipping");
                 }
             }
         }

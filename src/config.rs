@@ -255,3 +255,78 @@ impl ConnectionHistory {
         sorted
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // `AppConfig::{load, save}` hard-code the filename `ios-remote.toml` in
+    // the CWD, so tests that touch disk must serialize access.
+    static CWD_GUARD: Mutex<()> = Mutex::new(());
+
+    fn with_tempdir<F: FnOnce()>(f: F) {
+        let guard = CWD_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let original = std::env::current_dir().expect("cwd");
+        let dir = std::env::temp_dir().join(format!(
+            "ios-remote-cfg-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        std::env::set_current_dir(&original).ok();
+        std::fs::remove_dir_all(&dir).ok();
+        drop(guard);
+        if let Err(p) = result {
+            std::panic::resume_unwind(p);
+        }
+    }
+
+    #[test]
+    fn default_bind_address_is_loopback() {
+        let cfg = AppConfig::default();
+        assert_eq!(cfg.network.bind_address, "127.0.0.1");
+        assert!(!cfg.network.lan_access);
+        assert!(cfg.network.api_token.is_none());
+    }
+
+    #[test]
+    fn save_and_load_round_trip_preserves_fields() {
+        with_tempdir(|| {
+            let mut original = AppConfig::default();
+            original.network.api_token = Some("test-token-123".into());
+            original.network.lan_access = true;
+            original.save();
+
+            let loaded = AppConfig::load();
+            assert_eq!(loaded.network.api_token.as_deref(), Some("test-token-123"));
+            assert!(loaded.network.lan_access);
+            assert_eq!(loaded.network.bind_address, "127.0.0.1");
+        });
+    }
+
+    #[test]
+    fn resolve_api_token_generates_when_missing() {
+        with_tempdir(|| {
+            // Clear env for deterministic generation path.
+            // SAFETY: process-global env mutation; serialized by CWD_GUARD.
+            unsafe { std::env::remove_var("IOS_REMOTE_API_TOKEN") };
+            let mut cfg = AppConfig::default();
+            let resolved = cfg.resolve_api_token();
+            assert!(resolved.len() >= 24, "token should be >= 24 chars");
+            assert_eq!(cfg.network.api_token.as_deref(), Some(resolved.as_str()));
+        });
+    }
+
+    #[test]
+    fn generated_tokens_are_unique() {
+        let a = generate_token();
+        let b = generate_token();
+        assert_ne!(a, b);
+        assert!(a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+    }
+}

@@ -22,6 +22,7 @@ pub mod heatmap;
 pub mod i18n;
 pub mod keyboard_input;
 pub mod macros;
+pub mod wda_client;
 pub mod mouse_gesture;
 pub mod multi_device;
 pub mod notification_capture;

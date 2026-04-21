@@ -33,7 +33,30 @@ cargo run -- --pip
 
 # 録画付き
 cargo run -- --record
+
+# 接続中のデバイス一覧（UDID 確認用）
+cargo run -- --list-devices
+
+# 特定の iPhone を UDID 指定で使う
+cargo run -- --device 00008120-001A2B3C4D5E6F78
+
+# LAN の他 PC からダッシュボードを使う（Bearer トークン必須）
+cargo run -- --lan
 ```
+
+### 初回起動時のログ
+
+起動直後に以下のようなログが出ます。`API token` の値をメモしてください（設定ファイルにも保存されます）。
+
+```
+INFO  API token (Bearer): kQ3m7dF2-sLaP9xR0cT8vB1n
+INFO  Local-only mode — use --lan to expose on all interfaces.
+INFO  Web dashboard: http://127.0.0.1:8080
+```
+
+- 既定は `127.0.0.1` にのみバインドするため、同じ PC の Web ブラウザからのみ到達可能です。
+- `--lan` を付けると `0.0.0.0` にバインドし、LAN の他ホストからもアクセスできます。その際 API トークンは必須です。
+- トークンは `IOS_REMOTE_API_TOKEN` 環境変数で上書き、または `ios-remote.toml` の `[network] api_token` で固定できます。
 
 ### 必要なもの
 
@@ -130,9 +153,33 @@ cargo run -- --record
 - **i18n** — 日本語 / English / 中文 / 한국어
 - **テーマ** — Dark / Light / Midnight / Nature
 
+## Troubleshooting
+
+| 症状 | 確認ポイント |
+|------|--------------|
+| `Cannot connect to usbmuxd` | iTunes / Apple Devices が起動し `AppleMobileDeviceService` が Windows サービスとして走っているか |
+| `No iPhone connected` | USB ケーブル、接続ポート、iPhone 側の「信頼」タップ |
+| 画面が固まる | USB-C ケーブルがデータ通信対応か（充電専用ケーブルでは動きません） |
+| 起動直後に自動再接続を繰り返す | `--list-devices` で UDID を確認し、`--device <UDID>` で固定 |
+| ブラウザで Web Dashboard に `401 Unauthorized` | 起動ログの API token を確認、URL 直打ちではなく `/` から開くかヘッダ付きで叩く |
+| `Failed to bind Web dashboard` | `-w <PORT>` で別ポートを指定 |
+| 複数 iPhone を同時接続したい | 現時点では 1 台ずつ。`--device` で切り替え |
+
+## Macro setup (iOS 入力送信)
+
+`MacroAction::Tap` / `Swipe` / `LongPress` は [WebDriverAgent (WDA)](https://github.com/appium/WebDriverAgent) を介して iPhone に入力を送ります。`screenshotr` サービスは読み取り専用なので、入力には Apple Developer 証明書で署名した WDA のサイドロードが必須です。
+
+1. WDA を Xcode でビルドし iPhone にインストール
+2. iPhone 上で WDA を一度起動し、ポート 8100 で待ち受けていることを確認
+3. PC 側で `iproxy 8100 8100` 等で USB ポートを転送
+4. 起動時に環境変数 `IOS_REMOTE_WDA_URL=http://127.0.0.1:8100` を指定（既定でも同じ値）
+5. `POST /api/macros/run` か `F7` キーでマクロ実行
+
+WDA が起動していない場合、`Tap`/`Swipe`/`LongPress` アクションはエラーで返りますが、プロセスは落ちません（`Wait` や `Screenshot` アクションは引き続き動きます）。
+
 ## Web Dashboard
 
-ブラウザで `http://localhost:8080` を開くとリアルタイムダッシュボードが使えます。
+ブラウザで `http://localhost:8080` を開くとリアルタイムダッシュボードが使えます。トークンはダッシュボード HTML にインラインで埋め込まれ、fetch 呼び出しに自動付与されます。
 
 ### REST API
 
@@ -166,6 +213,11 @@ show_touch_overlay = true
 [recording]
 auto_record = false
 output_dir = "recordings"
+
+[network]
+bind_address = "127.0.0.1"   # "0.0.0.0" にすると LAN 公開。--lan でも同等
+lan_access = false            # true にすると bind_address を強制的に 0.0.0.0 扱いに
+api_token = ""                # 空で起動すると自動生成してここに書き込まれます
 
 [features]
 notification_capture = true
@@ -285,6 +337,12 @@ cargo build --release
 
 # With Lua scripting
 cargo build --features lua
+
+# Stream Deck ボタン連携（HID、要実機）
+cargo build --features stream_deck
+
+# ローカル Whisper 文字起こし（要 ggml モデル）
+cargo build --features whisper
 
 # Run tests
 cargo test

@@ -1,0 +1,40 @@
+name: test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build-and-test:
+    name: Build + test (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build (default features)
+        run: cargo build --locked
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Clippy (treat warnings as errors)
+        run: cargo clippy --locked -- -D warnings
+        continue-on-error: true  # existing code has some warnings; tighten over time
+
+      - name: Rustfmt check
+        run: cargo fmt --check
+        continue-on-error: true  # ditto
+
+      - name: Build optional features compile cleanly
+        run: cargo build --locked --features lua
