@@ -1,8 +1,9 @@
 # Smoke Test — v0.5.0
 
 **Date:** 2026-04-21
-**Binary:** `target/release/ios-remote.exe` (8.5 MB, built on this machine)
-**Tester:** agent-driven partial smoke (no iPhone), then human completion
+**Binary:** `target/release/ios-remote.exe` (v0.5.0, re-built after PR9–12)
+**Tested at:** Post-release tag `v0.5.0`, commit `ec07d1a`
+**Tester:** agent-driven API/auth smoke (no iPhone), then human completion
 
 This file is the running record for Phase A of the v0.5.0 release plan.
 Update each section with PASS / FAIL / log excerpts as you work through it.
@@ -58,11 +59,28 @@ INFO Web dashboard: http://127.0.0.1:18080
 
 ### ✅ S4. Token authentication
 ```
-GET /                          → HTTP 200   (dashboard HTML with inline token)
-GET /api/stats (no auth)       → HTTP 401   ✓ bearer middleware rejects
-GET /api/stats (Bearer <tok>)  → HTTP 200   ✓ bearer middleware accepts
+GET /                                         → HTTP 200   dashboard HTML (token inlined)
+GET /api/stats (no auth)                      → HTTP 401   ✓ bearer middleware rejects
+GET /api/stats (wrong token)                  → HTTP 401   ✓ wrong token rejected
+GET /api/stats (correct Bearer)               → HTTP 200   ✓ accepted, JSON body returned
+GET /api/stats (?token=…)                     → HTTP 200   ✓ query-string fallback works
 ```
-**Pass.** Both the 401 rejection and 200 acceptance paths work.
+Response body (truncated):
+```
+{"connected":false,"device_name":"","fps":0.0,"frames_received":0,
+ "uptime_secs":0,"resolution":"","bitrate_kbps":0.0}
+```
+**Pass.** All four auth paths behave as specified.
+
+### ✅ S4b. Recording API end-to-end
+```
+POST /api/recording/start              → {"path":"recordings\\rec_…h264","status":"recording_started"}
+POST /api/recording/start (again)      → {"error":"recording already in progress","status":"error"}
+POST /api/recording/stop               → {"path":"recordings\\rec_…h264","status":"recording_stopped"}
+POST /api/recording/stop (idle)        → {"error":"no recording in progress","status":"idle"}
+```
+File `recordings/rec_20260421_134004_214398.h264` created on disk.
+**Pass.** RecordingController single-flight guard + path reporting both work.
 
 ### ✅ S5. USB reconnect backoff (no device)
 Logs after ~2s of running:
