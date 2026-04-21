@@ -11,5 +11,5 @@ pub mod syslog;
 /// - Syslog relay for real-time device logs
 /// - Crash log retrieval
 ///
-/// These features work over USB and are independent of AirPlay.
+/// These features work over USB alongside the screenshotr capture loop.
 pub struct _Placeholder;

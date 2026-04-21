@@ -24,7 +24,7 @@ pub fn run_display(mut frame_rx: broadcast::Receiver<Arc<Frame>>, pip_mode: bool
     let title = if pip_mode {
         "ios-remote [PiP]"
     } else {
-        "ios-remote — AirPlay Mirror"
+        "ios-remote — USB Mirror"
     };
 
     let mut window = match Window::new(title, init_w, init_h, opts) {

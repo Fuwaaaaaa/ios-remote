@@ -1,10 +1,10 @@
 /// Connection QR code generator: create a QR code with PC's IP and port.
 ///
 /// Display the QR code in the terminal or save as PNG. iPhone can scan it
-/// (future: companion app reads QR to auto-configure AirPlay target).
+/// to open the Web Dashboard in Safari.
 
 pub fn generate_connection_qr(ip: &str, port: u16) -> String {
-    let url = format!("airplay://{}:{}", ip, port);
+    let url = format!("http://{}:{}", ip, port);
     // ASCII QR code using simple block characters
     ascii_qr(&url)
 }

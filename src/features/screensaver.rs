@@ -37,7 +37,7 @@ impl Screensaver {
                 draw_small_text(&mut rgba, width, dx, cy + 50, &date_str, [0x88, 0x88, 0x88]);
             }
             ScreensaverMode::ConnectionInfo { ip, port } => {
-                let msg = format!("AirPlay: {}:{}", ip, port);
+                let msg = format!("ios-remote: {}:{}", ip, port);
                 let hint = "Connect your iPhone to start mirroring";
                 let cx = width / 2 - (msg.len() as u32 * 8) / 2;
                 draw_small_text(&mut rgba, width, cx, height / 2 - 20, &msg, [0x00, 0xD4, 0xFF]);

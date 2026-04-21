@@ -2,8 +2,10 @@
 
 <p align="center">
   <strong>USB Type-C経由でiPhoneの画面をPCにミラーリング＆操作するツール</strong><br>
-  Pure Rust製 / Windows対応 / MIT License
+  Pure Rust製 / <strong>Windows 10 / 11 専用</strong> / MIT License
 </p>
+
+> ⚠️ **プラットフォーム:** 本ツールは Windows 10 / 11 **専用** です。macOS / Linux ではビルド時に `build.rs` がエラーを出します。これは `AppleMobileDeviceService` (Windows 版 iTunes / Apple Devices 付属) に依存しているためです。
 
 ---
 
@@ -37,10 +39,17 @@ cargo run -- --record
 
 | 項目 | 詳細 |
 |------|------|
+| **Windows 10 / 11** | 本ツールの動作 OS（他 OS 非対応） |
 | **USB Type-Cケーブル** | Lightning-to-Cでも可 |
-| **iTunes / Apple Devices** | Windowsにインストール（usbmuxdドライバ提供） |
+| **iTunes / Apple Devices** | Windowsにインストール（AppleMobileDeviceService / usbmuxd ドライバ提供） |
 | **「信頼」承認** | iPhone側で「このコンピュータを信頼しますか？」→「信頼」 |
 | **Rust 1.80+** | ビルド用 |
+
+### 対応状況
+
+- ✅ **Windows 10 / 11** — ネイティブ対応
+- ❌ **macOS / Linux** — 未対応（`build.rs` が build を拒否します）
+- ❌ **AirPlay モード** — v0.4.0 で削除、USB Type-C 一本化
 
 ## Features
 
@@ -283,7 +292,7 @@ cargo test
 
 ## CI/CD
 
-GitHub Actions で Windows / Linux / macOS の自動ビルドとリリースを実行:
+GitHub Actions で **Windows の自動ビルドとリリース**を実行します（macOS / Linux はビルド対象外）:
 
 ```bash
 # タグを打ってリリース

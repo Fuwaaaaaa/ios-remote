@@ -18,9 +18,9 @@ pub struct AppConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReceiverSettings {
-    /// Name shown on iPhone's AirPlay device list.
+    /// Display name for this receiver instance.
     pub name: String,
-    /// RTSP listen port.
+    /// Legacy listen port (unused in USB mode; retained for config compatibility).
     pub port: u16,
     /// Maximum resolution to advertise (width).
     pub max_width: u32,

@@ -2,7 +2,7 @@ use chrono::Local;
 use serde::Serialize;
 use std::fs;
 
-/// AirPlay protocol analyzer: detailed logging of all RTSP messages.
+/// Protocol analyzer: detailed logging of protocol messages (usbmuxd / lockdownd).
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ProtocolMessage {

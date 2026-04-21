@@ -8,7 +8,7 @@
 
 ### Step 1: 起動
 ```bash
-cd C:\project\test_branch\ios_remort
+cd C:\project\test\ios-remote
 RUST_LOG=ios_remote=debug cargo run
 ```
 
