@@ -1,4 +1,4 @@
-use crate::features::{screenshot, Frame};
+use crate::features::{Frame, screenshot};
 use minifb::{Key, Window, WindowOptions};
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -54,12 +54,13 @@ pub fn run_display(mut frame_rx: broadcast::Receiver<Arc<Frame>>, pip_mode: bool
 
         // Hotkeys
         if window.is_key_released(Key::S)
-            && let Some(ref frame) = latest_frame {
-                match screenshot::save_frame(frame) {
-                    Ok(path) => info!(file = %path, "Screenshot saved (hotkey)"),
-                    Err(e) => tracing::warn!(error = %e, "Screenshot failed"),
-                }
+            && let Some(ref frame) = latest_frame
+        {
+            match screenshot::save_frame(frame) {
+                Ok(path) => info!(file = %path, "Screenshot saved (hotkey)"),
+                Err(e) => tracing::warn!(error = %e, "Screenshot failed"),
             }
+        }
 
         window
             .update_with_buffer(&buffer, width, height)

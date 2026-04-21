@@ -51,7 +51,10 @@ impl KeyMapping {
 
         // Special keys
         m.insert("Return".to_string(), KeyAction::Special(SpecialKey::Return));
-        m.insert("Backspace".to_string(), KeyAction::Special(SpecialKey::Backspace));
+        m.insert(
+            "Backspace".to_string(),
+            KeyAction::Special(SpecialKey::Backspace),
+        );
         m.insert("Tab".to_string(), KeyAction::Special(SpecialKey::Tab));
 
         Self { mappings: m }

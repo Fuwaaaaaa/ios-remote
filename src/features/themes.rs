@@ -8,7 +8,7 @@ pub struct Theme {
     pub background: [u8; 3],
     pub foreground: [u8; 3],
     pub accent: [u8; 3],
-    pub overlay_bg: [u8; 4],    // RGBA
+    pub overlay_bg: [u8; 4], // RGBA
     pub overlay_text: [u8; 3],
     pub border: [u8; 3],
 }
@@ -63,7 +63,12 @@ impl Theme {
     }
 
     pub fn all_themes() -> Vec<Theme> {
-        vec![Self::dark(), Self::light(), Self::midnight(), Self::nature()]
+        vec![
+            Self::dark(),
+            Self::light(),
+            Self::midnight(),
+            Self::nature(),
+        ]
     }
 }
 

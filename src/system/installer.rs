@@ -6,7 +6,8 @@ use tracing::info;
 /// Run: `makensis installer.nsi` to create Setup.exe.
 pub fn generate_nsis_script() -> String {
     let version = env!("CARGO_PKG_VERSION");
-    format!(r#"
+    format!(
+        r#"
 !include "MUI2.nsh"
 
 Name "ios-remote {version}"
@@ -57,7 +58,8 @@ Section "Uninstall"
     nsExec::Exec 'netsh advfirewall firewall delete rule name="ios-remote"'
     DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ios-remote"
 SectionEnd
-"#)
+"#
+    )
 }
 
 /// Write the NSIS script to disk.

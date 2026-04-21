@@ -49,7 +49,9 @@ impl Throttle {
 
     /// Current usage as a fraction (0.0 - 1.0+).
     pub fn usage_fraction(&self) -> f64 {
-        if self.limit_bytes_per_sec == 0 { return 0.0; }
+        if self.limit_bytes_per_sec == 0 {
+            return 0.0;
+        }
         self.window_bytes as f64 / self.limit_bytes_per_sec as f64
     }
 }

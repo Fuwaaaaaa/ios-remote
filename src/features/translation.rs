@@ -73,10 +73,14 @@ fn translate_text(text: &str, source: &str, target: &str) -> Result<String, Stri
 
     let output = std::process::Command::new("curl")
         .args([
-            "-s", "-X", "POST",
+            "-s",
+            "-X",
+            "POST",
             "https://libretranslate.com/translate",
-            "-H", "Content-Type: application/json",
-            "-d", &body.to_string(),
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            &body.to_string(),
         ])
         .output()
         .map_err(|e| format!("curl failed: {}", e))?;
@@ -84,10 +88,7 @@ fn translate_text(text: &str, source: &str, target: &str) -> Result<String, Stri
     if output.status.success() {
         let resp: serde_json::Value = serde_json::from_slice(&output.stdout)
             .map_err(|e| format!("JSON parse error: {}", e))?;
-        Ok(resp["translatedText"]
-            .as_str()
-            .unwrap_or(text)
-            .to_string())
+        Ok(resp["translatedText"].as_str().unwrap_or(text).to_string())
     } else {
         // Fallback: return original text
         Err("Translation API unavailable — install LibreTranslate locally".to_string())

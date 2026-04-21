@@ -1,7 +1,7 @@
-pub mod usbmuxd;
+pub mod device;
 pub mod lockdown;
 pub mod screen_capture;
-pub mod device;
+pub mod usbmuxd;
 
 use crate::features::FrameBus;
 use std::time::Duration;
@@ -33,7 +33,10 @@ pub struct UsbReceiver {
 
 impl UsbReceiver {
     pub fn new(frame_bus: FrameBus) -> Self {
-        Self { frame_bus, preferred_udid: None }
+        Self {
+            frame_bus,
+            preferred_udid: None,
+        }
     }
 
     pub fn with_udid(mut self, udid: Option<String>) -> Self {
@@ -105,20 +108,17 @@ impl UsbReceiver {
 
     fn pick_device<'a>(&self, devices: &'a [UsbDevice]) -> anyhow::Result<&'a UsbDevice> {
         if let Some(want) = &self.preferred_udid {
-            return devices
-                .iter()
-                .find(|d| &d.udid == want)
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Requested UDID {} not connected. Available: [{}]",
-                        want,
-                        devices
-                            .iter()
-                            .map(|d| d.udid.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )
-                });
+            return devices.iter().find(|d| &d.udid == want).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Requested UDID {} not connected. Available: [{}]",
+                    want,
+                    devices
+                        .iter()
+                        .map(|d| d.udid.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            });
         }
         if devices.len() > 1 {
             warn!(

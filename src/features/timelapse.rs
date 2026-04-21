@@ -8,10 +8,7 @@ use tracing::{info, warn};
 ///
 /// Produces a sequence of PNGs that can be combined into a video:
 ///   ffmpeg -framerate 30 -i timelapse/frame_%06d.png -c:v libx264 timelapse.mp4
-pub async fn run_timelapse(
-    mut rx: broadcast::Receiver<Arc<Frame>>,
-    interval_secs: u64,
-) {
+pub async fn run_timelapse(mut rx: broadcast::Receiver<Arc<Frame>>, interval_secs: u64) {
     let dir = format!("timelapse/{}", Local::now().format("%Y%m%d_%H%M%S"));
     if let Err(e) = std::fs::create_dir_all(&dir) {
         warn!(error = %e, "Failed to create timelapse directory");
@@ -29,7 +26,9 @@ pub async fn run_timelapse(
         if let Ok(frame) = rx.try_recv() {
             let path = format!("{}/frame_{:06}.png", dir, frame_num);
             if let Some(img) = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(
-                frame.width, frame.height, frame.rgba.to_vec(),
+                frame.width,
+                frame.height,
+                frame.rgba.to_vec(),
             ) {
                 let _ = img.save(&path);
                 frame_num += 1;
@@ -45,10 +44,7 @@ pub async fn run_timelapse(
 }
 
 /// Export all frames from the FrameBus as a PNG sequence.
-pub async fn export_frame_sequence(
-    mut rx: broadcast::Receiver<Arc<Frame>>,
-    max_frames: u64,
-) {
+pub async fn export_frame_sequence(mut rx: broadcast::Receiver<Arc<Frame>>, max_frames: u64) {
     let dir = format!("frames/{}", Local::now().format("%Y%m%d_%H%M%S"));
     let _ = std::fs::create_dir_all(&dir);
     info!(dir = %dir, max = max_frames, "Frame sequence export started");
@@ -59,12 +55,16 @@ pub async fn export_frame_sequence(
             Ok(frame) => {
                 let path = format!("{}/frame_{:06}.png", dir, count);
                 if let Some(img) = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(
-                    frame.width, frame.height, frame.rgba.to_vec(),
+                    frame.width,
+                    frame.height,
+                    frame.rgba.to_vec(),
                 ) {
                     let _ = img.save(&path);
                 }
                 count += 1;
-                if count >= max_frames { break; }
+                if count >= max_frames {
+                    break;
+                }
             }
             Err(broadcast::error::RecvError::Lagged(_)) => {}
             Err(broadcast::error::RecvError::Closed) => break,

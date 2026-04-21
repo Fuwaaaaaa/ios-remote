@@ -23,25 +23,26 @@ pub async fn run(bus: FrameBus) {
                 }
 
                 if let Some(ref prev) = prev_frame
-                    && super::frame_analysis::detect_notification_banner(prev, &frame) {
-                        info!("Notification detected — auto-capturing");
+                    && super::frame_analysis::detect_notification_banner(prev, &frame)
+                {
+                    info!("Notification detected — auto-capturing");
 
-                        let dir = "notifications";
-                        let _ = std::fs::create_dir_all(dir);
-                        let _filename = format!(
-                            "{}/notif_{}.png",
-                            dir,
-                            Local::now().format("%Y%m%d_%H%M%S_%3f")
-                        );
+                    let dir = "notifications";
+                    let _ = std::fs::create_dir_all(dir);
+                    let _filename = format!(
+                        "{}/notif_{}.png",
+                        dir,
+                        Local::now().format("%Y%m%d_%H%M%S_%3f")
+                    );
 
-                        // Crop top 15% as the notification region
-                        let crop = crop_top(&frame, 0.15);
-                        if let Err(e) = screenshot::save_frame(&crop) {
-                            tracing::warn!(error = %e, "Failed to save notification capture");
-                        }
-
-                        cooldown = 30; // skip ~1 second of frames
+                    // Crop top 15% as the notification region
+                    let crop = crop_top(&frame, 0.15);
+                    if let Err(e) = screenshot::save_frame(&crop) {
+                        tracing::warn!(error = %e, "Failed to save notification capture");
                     }
+
+                    cooldown = 30; // skip ~1 second of frames
+                }
 
                 prev_frame = Some(frame);
             }

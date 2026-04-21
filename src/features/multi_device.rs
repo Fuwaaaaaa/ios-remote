@@ -50,13 +50,16 @@ impl DeviceManager {
             "Device registered"
         );
 
-        devices.insert(device_id.to_string(), DeviceEntry {
-            device_id: entry.device_id.clone(),
-            name: entry.name.clone(),
-            rtsp_port: entry.rtsp_port,
-            video_port: entry.video_port,
-            connected: true,
-        });
+        devices.insert(
+            device_id.to_string(),
+            DeviceEntry {
+                device_id: entry.device_id.clone(),
+                name: entry.name.clone(),
+                rtsp_port: entry.rtsp_port,
+                video_port: entry.video_port,
+                connected: true,
+            },
+        );
 
         entry
     }
@@ -64,9 +67,10 @@ impl DeviceManager {
     /// List all registered devices.
     pub async fn list(&self) -> Vec<(String, String, bool)> {
         let devices = self.devices.lock().await;
-        devices.values().map(|d| {
-            (d.device_id.clone(), d.name.clone(), d.connected)
-        }).collect()
+        devices
+            .values()
+            .map(|d| (d.device_id.clone(), d.name.clone(), d.connected))
+            .collect()
     }
 
     /// Mark a device as disconnected.

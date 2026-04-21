@@ -42,7 +42,8 @@ impl SessionRecorder {
             bookmarks: Vec::new(),
             recording: false,
             start_time: std::time::Instant::now(),
-            width: 0, height: 0,
+            width: 0,
+            height: 0,
         }
     }
 
@@ -54,10 +55,15 @@ impl SessionRecorder {
         info!("Session recording started");
     }
 
-    pub fn stop(&mut self) { self.recording = false; info!("Session recording stopped"); }
+    pub fn stop(&mut self) {
+        self.recording = false;
+        info!("Session recording stopped");
+    }
 
     pub fn push_frame(&mut self, frame: &Frame) {
-        if !self.recording { return; }
+        if !self.recording {
+            return;
+        }
         self.width = frame.width;
         self.height = frame.height;
         if let Some(ref nalu) = frame.h264_nalu {
@@ -75,7 +81,9 @@ impl SessionRecorder {
         info!(label, "Bookmark added");
     }
 
-    pub fn bookmarks(&self) -> &[Bookmark] { &self.bookmarks }
+    pub fn bookmarks(&self) -> &[Bookmark] {
+        &self.bookmarks
+    }
 
     /// Save session to directory.
     pub fn save(&self, dir: &str) -> Result<String, String> {
@@ -84,7 +92,8 @@ impl SessionRecorder {
 
         let header = SessionHeader {
             start_time: Local::now().to_rfc3339(),
-            width: self.width, height: self.height,
+            width: self.width,
+            height: self.height,
             total_frames: self.frames.len() as u64,
             duration_secs: self.start_time.elapsed().as_secs_f64(),
         };
@@ -130,8 +139,8 @@ impl SessionPlayer {
 
         let header_json = fs::read_to_string(dir.join("session.json"))
             .map_err(|e| format!("read session.json: {e}"))?;
-        let header: SessionHeader = serde_json::from_str(&header_json)
-            .map_err(|e| format!("parse session.json: {e}"))?;
+        let header: SessionHeader =
+            serde_json::from_str(&header_json).map_err(|e| format!("parse session.json: {e}"))?;
 
         let bookmarks_path = dir.join("bookmarks.json");
         let bookmarks: Vec<Bookmark> = if bookmarks_path.exists() {
@@ -142,8 +151,8 @@ impl SessionPlayer {
             Vec::new()
         };
 
-        let video = fs::read(dir.join("video.h264"))
-            .map_err(|e| format!("read video.h264: {e}"))?;
+        let video =
+            fs::read(dir.join("video.h264")).map_err(|e| format!("read video.h264: {e}"))?;
         let nalu_ranges = index_nal_units(&video);
 
         info!(
@@ -152,7 +161,12 @@ impl SessionPlayer {
             bookmarks = bookmarks.len(),
             "Session loaded"
         );
-        Ok(Self { header, bookmarks, video, nalu_ranges })
+        Ok(Self {
+            header,
+            bookmarks,
+            video,
+            nalu_ranges,
+        })
     }
 
     pub fn nal_count(&self) -> usize {
@@ -258,9 +272,8 @@ mod tests {
         .unwrap();
         // Three tiny NAL units separated by the 4-byte start code.
         let video = vec![
-            0x00, 0x00, 0x00, 0x01, 0x10,
-            0x00, 0x00, 0x00, 0x01, 0x20, 0x21,
-            0x00, 0x00, 0x00, 0x01, 0x30,
+            0x00, 0x00, 0x00, 0x01, 0x10, 0x00, 0x00, 0x00, 0x01, 0x20, 0x21, 0x00, 0x00, 0x00,
+            0x01, 0x30,
         ];
         std::fs::write(dir.join("video.h264"), video).unwrap();
     }
@@ -268,10 +281,7 @@ mod tests {
     #[test]
     fn indexes_annex_b_nal_units() {
         // Two NAL units: [0x00,0x00,0x00,0x01, AA, BB] [0x00,0x00,0x01, CC]
-        let stream = vec![
-            0x00, 0x00, 0x00, 0x01, 0xAA, 0xBB,
-            0x00, 0x00, 0x01, 0xCC,
-        ];
+        let stream = vec![0x00, 0x00, 0x00, 0x01, 0xAA, 0xBB, 0x00, 0x00, 0x01, 0xCC];
         let ranges = index_nal_units(&stream);
         assert_eq!(ranges.len(), 2);
         assert_eq!(&stream[ranges[0].0..ranges[0].1], &[0xAA, 0xBB]);

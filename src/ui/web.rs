@@ -7,11 +7,8 @@ use std::sync::Arc;
 pub async fn dashboard(State(state): State<Arc<ApiState>>) -> Html<String> {
     // JSON-escape the token defensively; our generator emits alphanumerics + `-_`
     // so this is belt-and-suspenders.
-    let token_js = serde_json::to_string(&state.api_token)
-        .unwrap_or_else(|_| "\"\"".to_string());
-    let bootstrap = format!(
-        "<script>window.__IOS_REMOTE_TOKEN={token_js};</script>"
-    );
+    let token_js = serde_json::to_string(&state.api_token).unwrap_or_else(|_| "\"\"".to_string());
+    let bootstrap = format!("<script>window.__IOS_REMOTE_TOKEN={token_js};</script>");
     Html(DASHBOARD_HTML.replace("<!--BOOTSTRAP-->", &bootstrap))
 }
 

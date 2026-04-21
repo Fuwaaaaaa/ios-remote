@@ -10,7 +10,13 @@ pub struct PresentationMode {
 
 impl PresentationMode {
     pub fn new() -> Self {
-        Self { enabled: false, laser_x: 0, laser_y: 0, laser_visible: false, cursor_hidden: false }
+        Self {
+            enabled: false,
+            laser_x: 0,
+            laser_y: 0,
+            laser_visible: false,
+            cursor_hidden: false,
+        }
     }
 
     pub fn toggle(&mut self) -> bool {
@@ -27,7 +33,9 @@ impl PresentationMode {
 
     /// Draw laser pointer dot onto RGBA buffer.
     pub fn draw_laser(&self, rgba: &mut [u8], w: u32, h: u32) {
-        if !self.laser_visible || !self.enabled { return; }
+        if !self.laser_visible || !self.enabled {
+            return;
+        }
         let radius = 8u32;
         let cx = self.laser_x;
         let cy = self.laser_y;
@@ -36,8 +44,12 @@ impl PresentationMode {
             for dx in 0..radius * 2 {
                 let px = cx + dx - radius;
                 let py = cy + dy - radius;
-                if px >= w || py >= h { continue; }
-                let dist = (((dx as i32 - radius as i32).pow(2) + (dy as i32 - radius as i32).pow(2)) as f32).sqrt();
+                if px >= w || py >= h {
+                    continue;
+                }
+                let dist = (((dx as i32 - radius as i32).pow(2)
+                    + (dy as i32 - radius as i32).pow(2)) as f32)
+                    .sqrt();
                 if dist <= radius as f32 {
                     let alpha = 1.0 - (dist / radius as f32);
                     let idx = ((py * w + px) * 4) as usize;

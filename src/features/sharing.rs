@@ -10,7 +10,7 @@ pub async fn serve_mjpeg(
     mut rx: tokio::sync::broadcast::Receiver<std::sync::Arc<Frame>>,
     port: u16,
 ) {
-    use axum::{routing::get, Router};
+    use axum::{Router, routing::get};
     use tokio::net::TcpListener;
 
     let (tx, _) = tokio::sync::broadcast::channel::<Vec<u8>>(4);
@@ -31,23 +31,35 @@ pub async fn serve_mjpeg(
         }
     });
 
-    let app = Router::new().route("/stream", get(move || {
-        let _rx = tx.subscribe();
-        async move {
-            let boundary = "frame";
-            let headers = [
-                ("Content-Type", format!("multipart/x-mixed-replace; boundary={}", boundary)),
-                ("Cache-Control", "no-cache".to_string()),
-            ];
-            // In a full implementation, this would return a streaming body.
-            // For now, return a static message.
-            (headers, "MJPEG stream endpoint — connect a viewer to receive frames")
-        }
-    }));
+    let app = Router::new().route(
+        "/stream",
+        get(move || {
+            let _rx = tx.subscribe();
+            async move {
+                let boundary = "frame";
+                let headers = [
+                    (
+                        "Content-Type",
+                        format!("multipart/x-mixed-replace; boundary={}", boundary),
+                    ),
+                    ("Cache-Control", "no-cache".to_string()),
+                ];
+                // In a full implementation, this would return a streaming body.
+                // For now, return a static message.
+                (
+                    headers,
+                    "MJPEG stream endpoint — connect a viewer to receive frames",
+                )
+            }
+        }),
+    );
 
     match TcpListener::bind(("127.0.0.1", port)).await {
         Ok(listener) => {
-            info!(port, "MJPEG screen sharing: http://localhost:{}/stream", port);
+            info!(
+                port,
+                "MJPEG screen sharing: http://localhost:{}/stream", port
+            );
             let _ = axum::serve(listener, app).await;
         }
         Err(e) => {
@@ -62,9 +74,9 @@ pub async fn serve_mjpeg(
 
 fn encode_jpeg(frame: &Frame) -> Result<Vec<u8>, String> {
     use image::{ImageBuffer, Rgba};
-    let _img: ImageBuffer<Rgba<u8>, _> = ImageBuffer::from_raw(
-        frame.width, frame.height, frame.rgba.clone(),
-    ).ok_or("Image buffer creation failed")?;
+    let _img: ImageBuffer<Rgba<u8>, _> =
+        ImageBuffer::from_raw(frame.width, frame.height, frame.rgba.clone())
+            .ok_or("Image buffer creation failed")?;
 
     let mut buf = Vec::new();
     let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 70);
@@ -74,7 +86,8 @@ fn encode_jpeg(frame: &Frame) -> Result<Vec<u8>, String> {
         frame.width,
         frame.height,
         image::ExtendedColorType::Rgba8,
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(buf)
 }
@@ -111,14 +124,24 @@ impl NotificationForwarder {
 
         if let (Some(token), Some(chat_id)) = (&self.telegram_bot_token, &self.telegram_chat_id) {
             let url = format!("https://api.telegram.org/bot{}/sendMessage", token);
-            let body = serde_json::json!({"chat_id": chat_id, "text": format!("{}\n{}", title, message)});
+            let body =
+                serde_json::json!({"chat_id": chat_id, "text": format!("{}\n{}", title, message)});
             Self::post_json(&url, &body);
         }
     }
 
     fn post_json(url: &str, body: &serde_json::Value) {
         let _ = std::process::Command::new("curl")
-            .args(["-s", "-X", "POST", url, "-H", "Content-Type: application/json", "-d", &body.to_string()])
+            .args([
+                "-s",
+                "-X",
+                "POST",
+                url,
+                "-H",
+                "Content-Type: application/json",
+                "-d",
+                &body.to_string(),
+            ])
             .output();
     }
 }

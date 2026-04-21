@@ -37,12 +37,9 @@ pub fn save_frame(frame: &Frame) -> Result<String, String> {
         Local::now().format("%Y%m%d_%H%M%S_%3f")
     );
 
-    let img: ImageBuffer<Rgba<u8>, _> = ImageBuffer::from_raw(
-        frame.width,
-        frame.height,
-        frame.rgba.clone(),
-    )
-    .ok_or("Failed to create image buffer")?;
+    let img: ImageBuffer<Rgba<u8>, _> =
+        ImageBuffer::from_raw(frame.width, frame.height, frame.rgba.clone())
+            .ok_or("Failed to create image buffer")?;
 
     img.save(&filename).map_err(|e| e.to_string())?;
 

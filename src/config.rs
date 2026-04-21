@@ -123,18 +123,16 @@ impl AppConfig {
     /// Load config from file, or create default if missing.
     pub fn load() -> Self {
         match fs::read_to_string(CONFIG_FILE) {
-            Ok(content) => {
-                match toml::from_str(&content) {
-                    Ok(config) => {
-                        info!(file = CONFIG_FILE, "Configuration loaded");
-                        config
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "Config parse error — using defaults");
-                        Self::default()
-                    }
+            Ok(content) => match toml::from_str(&content) {
+                Ok(config) => {
+                    info!(file = CONFIG_FILE, "Configuration loaded");
+                    config
                 }
-            }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Config parse error — using defaults");
+                    Self::default()
+                }
+            },
             Err(_) => {
                 let config = Self::default();
                 config.save();
@@ -165,9 +163,10 @@ impl AppConfig {
             }
         }
         if let Some(existing) = &self.network.api_token
-            && !existing.is_empty() {
-                return existing.clone();
-            }
+            && !existing.is_empty()
+        {
+            return existing.clone();
+        }
         let token = generate_token();
         self.network.api_token = Some(token.clone());
         self.save();
@@ -181,8 +180,7 @@ fn generate_token() -> String {
     let mut bytes = [0u8; 24];
     rand::thread_rng().fill_bytes(&mut bytes);
     // URL-safe base64 without padding (0-9A-Za-z-_).
-    const ALPHABET: &[u8] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut out = String::with_capacity(32);
     let mut i = 0;
     while i + 3 <= bytes.len() {
@@ -326,6 +324,9 @@ mod tests {
         let a = generate_token();
         let b = generate_token();
         assert_ne!(a, b);
-        assert!(a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert!(
+            a.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        );
     }
 }

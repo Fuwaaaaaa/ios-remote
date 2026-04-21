@@ -37,11 +37,7 @@ pub async fn rtmp_stream(mut rx: broadcast::Receiver<Arc<Frame>>, rtmp_url: Stri
 
     let mut child = match std::process::Command::new("ffmpeg")
         .args([
-            "-f", "h264",
-            "-i", "pipe:0",
-            "-c:v", "copy",
-            "-f", "flv",
-            &rtmp_url,
+            "-f", "h264", "-i", "pipe:0", "-c:v", "copy", "-f", "flv", &rtmp_url,
         ])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())

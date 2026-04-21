@@ -32,8 +32,12 @@ pub fn run_benchmark(width: u32, height: u32, frames: u32) -> BenchmarkResult {
     // Measure filter apply speed
     let start = Instant::now();
     let settings = super::video_filter::FilterSettings {
-        brightness: 0.1, contrast: 1.2, saturation: 0.8,
-        grayscale: false, invert: false, sepia: false,
+        brightness: 0.1,
+        contrast: 1.2,
+        saturation: 0.8,
+        grayscale: false,
+        invert: false,
+        sepia: false,
     };
     for _ in 0..frames {
         let mut buf = rgba.clone();
@@ -46,7 +50,10 @@ pub fn run_benchmark(width: u32, height: u32, frames: u32) -> BenchmarkResult {
     let render_fps = frames as f64 / filter_total.as_secs_f64();
 
     let result = BenchmarkResult {
-        decode_fps, render_fps, yuv_convert_ms: yuv_ms, filter_apply_ms: filter_ms,
+        decode_fps,
+        render_fps,
+        yuv_convert_ms: yuv_ms,
+        filter_apply_ms: filter_ms,
         memory_mb: (pixel_count * 4) as f64 / 1024.0 / 1024.0,
     };
 
@@ -72,7 +79,12 @@ pub struct DebugOverlay {
 
 impl DebugOverlay {
     pub fn new() -> Self {
-        Self { frame_queue_depth: 0, decode_backlog: 0, memory_used_mb: 0.0, gc_count: 0 }
+        Self {
+            frame_queue_depth: 0,
+            decode_backlog: 0,
+            memory_used_mb: 0.0,
+            gc_count: 0,
+        }
     }
 
     pub fn format(&self) -> String {
@@ -91,18 +103,30 @@ pub struct AdaptiveBitrate {
 }
 
 #[derive(Clone, Debug)]
-pub enum Quality { High, Medium, Low }
+pub enum Quality {
+    High,
+    Medium,
+    Low,
+}
 
 impl AdaptiveBitrate {
     pub fn new() -> Self {
-        Self { current_quality: Quality::High, fps_history: Vec::new(), latency_history: Vec::new() }
+        Self {
+            current_quality: Quality::High,
+            fps_history: Vec::new(),
+            latency_history: Vec::new(),
+        }
     }
 
     pub fn update(&mut self, fps: f64, latency_ms: f64) {
         self.fps_history.push(fps);
         self.latency_history.push(latency_ms);
-        if self.fps_history.len() > 30 { self.fps_history.remove(0); }
-        if self.latency_history.len() > 30 { self.latency_history.remove(0); }
+        if self.fps_history.len() > 30 {
+            self.fps_history.remove(0);
+        }
+        if self.latency_history.len() > 30 {
+            self.latency_history.remove(0);
+        }
 
         let avg_fps = self.fps_history.iter().sum::<f64>() / self.fps_history.len() as f64;
         let avg_lat = self.latency_history.iter().sum::<f64>() / self.latency_history.len() as f64;

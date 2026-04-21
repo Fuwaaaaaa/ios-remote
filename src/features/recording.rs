@@ -3,8 +3,8 @@ use chrono::Local;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
@@ -79,10 +79,7 @@ impl RecordingController {
             self.active.store(false, Ordering::SeqCst);
         })?;
         {
-            let mut slot = self
-                .current_path
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let mut slot = self.current_path.lock().unwrap_or_else(|e| e.into_inner());
             *slot = Some(path.clone());
         }
         let rx = self.frame_bus.subscribe();

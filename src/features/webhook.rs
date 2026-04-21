@@ -27,14 +27,20 @@ pub struct WebhookManager {
 }
 
 impl WebhookManager {
-    pub fn new() -> Self { Self { hooks: Vec::new() } }
+    pub fn new() -> Self {
+        Self { hooks: Vec::new() }
+    }
 
-    pub fn add(&mut self, hook: WebhookConfig) { self.hooks.push(hook); }
+    pub fn add(&mut self, hook: WebhookConfig) {
+        self.hooks.push(hook);
+    }
 
     /// Fire all hooks matching the event.
     pub fn fire(&self, event: WebhookEvent, payload: &serde_json::Value) {
         for hook in &self.hooks {
-            if !hook.enabled || !hook.events.contains(&event) { continue; }
+            if !hook.enabled || !hook.events.contains(&event) {
+                continue;
+            }
             let url = hook.url.clone();
             let body = serde_json::json!({
                 "event": format!("{:?}", event),
@@ -44,7 +50,16 @@ impl WebhookManager {
             // Fire-and-forget
             std::thread::spawn(move || {
                 let _ = std::process::Command::new("curl")
-                    .args(["-s", "-X", "POST", &url, "-H", "Content-Type: application/json", "-d", &body.to_string()])
+                    .args([
+                        "-s",
+                        "-X",
+                        "POST",
+                        &url,
+                        "-H",
+                        "Content-Type: application/json",
+                        "-d",
+                        &body.to_string(),
+                    ])
                     .output();
             });
             info!(url = %hook.url, event = ?event, "Webhook fired");
@@ -53,11 +68,7 @@ impl WebhookManager {
 }
 
 /// Batch screenshot: take screenshots at regular intervals.
-pub async fn batch_screenshots(
-    bus: super::FrameBus,
-    interval_secs: u64,
-    count: u64,
-) {
+pub async fn batch_screenshots(bus: super::FrameBus, interval_secs: u64, count: u64) {
     let dir = "screenshots/batch";
     let _ = std::fs::create_dir_all(dir);
     info!(interval = interval_secs, count, "Batch screenshot started");

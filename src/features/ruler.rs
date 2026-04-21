@@ -26,14 +26,17 @@ impl Measurement {
         // Draw dashed line
         let steps = self.distance_px as u32;
         for i in 0..steps {
-            if i % 6 < 4 { // dash pattern: 4 on, 2 off
+            if i % 6 < 4 {
+                // dash pattern: 4 on, 2 off
                 let t = i as f32 / steps as f32;
-                let x = (self.start.0 as f32 + (self.end.0 as f32 - self.start.0 as f32) * t) as u32;
-                let y = (self.start.1 as f32 + (self.end.1 as f32 - self.start.1 as f32) * t) as u32;
+                let x =
+                    (self.start.0 as f32 + (self.end.0 as f32 - self.start.0 as f32) * t) as u32;
+                let y =
+                    (self.start.1 as f32 + (self.end.1 as f32 - self.start.1 as f32) * t) as u32;
                 if x < width && y < height {
                     let idx = ((y * width + x) * 4) as usize;
                     if idx + 2 < rgba.len() {
-                        rgba[idx] = 255;     // Red
+                        rgba[idx] = 255; // Red
                         rgba[idx + 1] = 80;
                         rgba[idx + 2] = 80;
                     }

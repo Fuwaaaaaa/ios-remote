@@ -1,4 +1,3 @@
-
 /// Privacy mode: blur/redact sensitive areas of the screen.
 ///
 /// Useful when recording or streaming to hide passwords, personal info,
@@ -34,7 +33,9 @@ pub fn apply_privacy_zones(rgba: &mut [u8], width: u32, height: u32, zones: &[Pr
                 fill_region(rgba, width, zone.x, zone.y, zone.w, zone.h, color);
             }
             BlurMode::Pixelate { block_size } => {
-                pixelate_region(rgba, width, height, zone.x, zone.y, zone.w, zone.h, block_size);
+                pixelate_region(
+                    rgba, width, height, zone.x, zone.y, zone.w, zone.h, block_size,
+                );
             }
         }
     }

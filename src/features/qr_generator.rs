@@ -17,7 +17,12 @@ pub fn local_ip() -> Result<String, String> {
         .map_err(|e| format!("Failed to get IP: {}", e))?;
 
     if output.status.success() {
-        let ip = String::from_utf8_lossy(&output.stdout).trim().lines().next().unwrap_or("0.0.0.0").to_string();
+        let ip = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .lines()
+            .next()
+            .unwrap_or("0.0.0.0")
+            .to_string();
         Ok(ip)
     } else {
         Err("Could not determine local IP".to_string())
@@ -34,6 +39,9 @@ fn ascii_qr(data: &str) -> String {
 
     format!(
         "{border}\n{empty}\n{content}\n{empty}\n{border}\n\nScan or enter: {data}",
-        border = border, empty = empty, content = content, data = data
+        border = border,
+        empty = empty,
+        content = content,
+        data = data
     )
 }

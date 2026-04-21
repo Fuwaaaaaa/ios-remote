@@ -68,10 +68,12 @@ impl GifCapture {
         let file = File::create(&filename).map_err(|e| e.to_string())?;
 
         let first = &self.buffer[0];
-        let mut encoder = gif::Encoder::new(file, first.width, first.height, &[])
-            .map_err(|e| e.to_string())?;
+        let mut encoder =
+            gif::Encoder::new(file, first.width, first.height, &[]).map_err(|e| e.to_string())?;
 
-        encoder.set_repeat(gif::Repeat::Infinite).map_err(|e| e.to_string())?;
+        encoder
+            .set_repeat(gif::Repeat::Infinite)
+            .map_err(|e| e.to_string())?;
 
         let delay = (100 / self.gif_fps.max(1)) as u16; // centiseconds per frame
 

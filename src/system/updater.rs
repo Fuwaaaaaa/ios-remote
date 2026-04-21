@@ -13,7 +13,10 @@ struct GithubRelease {
 
 /// Check GitHub Releases for a newer version.
 pub fn check_for_update() -> Result<Option<UpdateInfo>, String> {
-    let url = format!("https://api.github.com/repos/{}/releases/latest", GITHUB_REPO);
+    let url = format!(
+        "https://api.github.com/repos/{}/releases/latest",
+        GITHUB_REPO
+    );
 
     let output = std::process::Command::new("curl")
         .args(["-s", "-H", "User-Agent: ios-remote", &url])
@@ -24,13 +27,17 @@ pub fn check_for_update() -> Result<Option<UpdateInfo>, String> {
         return Err("GitHub API request failed".to_string());
     }
 
-    let release: GithubRelease = serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("JSON parse error: {}", e))?;
+    let release: GithubRelease =
+        serde_json::from_slice(&output.stdout).map_err(|e| format!("JSON parse error: {}", e))?;
 
     let remote_ver = release.tag_name.trim_start_matches('v');
 
     if version_newer(remote_ver, CURRENT_VERSION) {
-        info!(current = CURRENT_VERSION, latest = remote_ver, "Update available");
+        info!(
+            current = CURRENT_VERSION,
+            latest = remote_ver,
+            "Update available"
+        );
         Ok(Some(UpdateInfo {
             current: CURRENT_VERSION.to_string(),
             latest: remote_ver.to_string(),
@@ -53,16 +60,18 @@ pub struct UpdateInfo {
 
 /// Simple semver comparison (a > b?).
 fn version_newer(a: &str, b: &str) -> bool {
-    let parse = |v: &str| -> Vec<u32> {
-        v.split('.').filter_map(|s| s.parse().ok()).collect()
-    };
+    let parse = |v: &str| -> Vec<u32> { v.split('.').filter_map(|s| s.parse().ok()).collect() };
     let va = parse(a);
     let vb = parse(b);
     for i in 0..va.len().max(vb.len()) {
         let a = va.get(i).copied().unwrap_or(0);
         let b = vb.get(i).copied().unwrap_or(0);
-        if a > b { return true; }
-        if a < b { return false; }
+        if a > b {
+            return true;
+        }
+        if a < b {
+            return false;
+        }
     }
     false
 }

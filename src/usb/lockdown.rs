@@ -19,7 +19,10 @@ pub struct LockdownClient {
 
 impl LockdownClient {
     /// Connect to lockdownd on a device via usbmuxd tunnel.
-    pub async fn connect(_mux: &mut super::usbmuxd::UsbmuxdClient, device_id: u32) -> anyhow::Result<Self> {
+    pub async fn connect(
+        _mux: &mut super::usbmuxd::UsbmuxdClient,
+        device_id: u32,
+    ) -> anyhow::Result<Self> {
         // Create a new usbmuxd connection for the tunnel
         let mut tunnel = super::usbmuxd::UsbmuxdClient::connect().await?;
         tunnel.connect_to_device(device_id, LOCKDOWN_PORT).await?;
@@ -42,47 +45,86 @@ impl LockdownClient {
         self.send_plist(&Value::Dictionary(req)).await?;
         let resp = self.recv_plist().await?;
 
-        Ok(resp.get("Value").cloned().unwrap_or(Value::String("".to_string())))
+        Ok(resp
+            .get("Value")
+            .cloned()
+            .unwrap_or(Value::String("".to_string())))
     }
 
     /// Get basic device info (name, model, iOS version, etc.).
     pub async fn get_device_info(&mut self) -> anyhow::Result<DeviceInfo> {
-        let name = self.get_value(None, "DeviceName").await?
-            .as_string().unwrap_or("iPhone").to_string();
-        let model = self.get_value(None, "ProductType").await?
-            .as_string().unwrap_or("unknown").to_string();
-        let ios_version = self.get_value(None, "ProductVersion").await?
-            .as_string().unwrap_or("unknown").to_string();
-        let udid = self.get_value(None, "UniqueDeviceID").await?
-            .as_string().unwrap_or("unknown").to_string();
+        let name = self
+            .get_value(None, "DeviceName")
+            .await?
+            .as_string()
+            .unwrap_or("iPhone")
+            .to_string();
+        let model = self
+            .get_value(None, "ProductType")
+            .await?
+            .as_string()
+            .unwrap_or("unknown")
+            .to_string();
+        let ios_version = self
+            .get_value(None, "ProductVersion")
+            .await?
+            .as_string()
+            .unwrap_or("unknown")
+            .to_string();
+        let udid = self
+            .get_value(None, "UniqueDeviceID")
+            .await?
+            .as_string()
+            .unwrap_or("unknown")
+            .to_string();
 
-        Ok(DeviceInfo { name, model, ios_version, udid })
+        Ok(DeviceInfo {
+            name,
+            model,
+            ios_version,
+            udid,
+        })
     }
 
     /// Start a lockdownd service (e.g., "com.apple.mobile.screenshotr").
     pub async fn start_service(&mut self, service_name: &str) -> anyhow::Result<ServiceInfo> {
         let mut req = Dictionary::new();
-        req.insert("Request".to_string(), Value::String("StartService".to_string()));
-        req.insert("Service".to_string(), Value::String(service_name.to_string()));
+        req.insert(
+            "Request".to_string(),
+            Value::String("StartService".to_string()),
+        );
+        req.insert(
+            "Service".to_string(),
+            Value::String(service_name.to_string()),
+        );
 
         self.send_plist(&Value::Dictionary(req)).await?;
         let resp = self.recv_plist().await?;
 
         let error = resp.get("Error").and_then(|v| v.as_string());
         if let Some(err) = error {
-            return Err(anyhow::anyhow!("StartService '{}' failed: {}", service_name, err));
+            return Err(anyhow::anyhow!(
+                "StartService '{}' failed: {}",
+                service_name,
+                err
+            ));
         }
 
-        let port = resp.get("Port")
+        let port = resp
+            .get("Port")
             .and_then(|v| v.as_unsigned_integer())
             .unwrap_or(0) as u16;
 
-        let ssl = resp.get("EnableServiceSSL")
+        let ssl = resp
+            .get("EnableServiceSSL")
             .and_then(|v| v.as_boolean())
             .unwrap_or(false);
 
         info!(service = service_name, port, ssl, "Service started");
-        Ok(ServiceInfo { port, enable_ssl: ssl })
+        Ok(ServiceInfo {
+            port,
+            enable_ssl: ssl,
+        })
     }
 
     async fn send_plist(&mut self, value: &Value) -> anyhow::Result<()> {
@@ -103,7 +145,10 @@ impl LockdownClient {
         let len = u32::from_be_bytes(len_buf) as usize;
 
         if len == 0 || len > 1_000_000 {
-            return Err(anyhow::anyhow!("Invalid lockdownd response length: {}", len));
+            return Err(anyhow::anyhow!(
+                "Invalid lockdownd response length: {}",
+                len
+            ));
         }
 
         let mut body = vec![0u8; len];

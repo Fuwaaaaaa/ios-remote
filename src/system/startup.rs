@@ -1,6 +1,6 @@
 use tracing::{info, warn};
-use winreg::enums::*;
 use winreg::RegKey;
+use winreg::enums::*;
 
 const APP_NAME: &str = "ios-remote";
 
@@ -8,11 +8,13 @@ const APP_NAME: &str = "ios-remote";
 pub fn enable_startup() -> Result<(), String> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let run_key = hkcu
-        .open_subkey_with_flags(r"Software\Microsoft\Windows\CurrentVersion\Run", KEY_SET_VALUE)
+        .open_subkey_with_flags(
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            KEY_SET_VALUE,
+        )
         .map_err(|e| format!("Registry open failed: {}", e))?;
 
-    let exe_path = std::env::current_exe()
-        .map_err(|e| format!("Failed to get exe path: {}", e))?;
+    let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
 
     run_key
         .set_value(APP_NAME, &exe_path.to_string_lossy().as_ref())
@@ -26,7 +28,10 @@ pub fn enable_startup() -> Result<(), String> {
 pub fn disable_startup() -> Result<(), String> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let run_key = hkcu
-        .open_subkey_with_flags(r"Software\Microsoft\Windows\CurrentVersion\Run", KEY_SET_VALUE)
+        .open_subkey_with_flags(
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            KEY_SET_VALUE,
+        )
         .map_err(|e| format!("Registry open failed: {}", e))?;
 
     match run_key.delete_value(APP_NAME) {
@@ -59,7 +64,10 @@ pub struct BatteryWidget {
 
 impl BatteryWidget {
     pub fn new() -> Self {
-        Self { level: 0, charging: false }
+        Self {
+            level: 0,
+            charging: false,
+        }
     }
 
     pub fn update(&mut self, level: u8, charging: bool) {

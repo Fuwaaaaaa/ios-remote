@@ -1,7 +1,7 @@
 use super::usbmuxd::UsbmuxdClient;
 use crate::features::{Frame, FrameBus};
-use image::codecs::png::PngDecoder;
 use image::ImageDecoder;
+use image::codecs::png::PngDecoder;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{info, warn};
 
@@ -42,7 +42,10 @@ pub async fn capture_loop(
     ss_tunnel.connect_to_device(device_id, service.port).await?;
     let stream = ss_tunnel.stream_mut();
 
-    info!(port = service.port, "Screenshotr connected — starting capture loop");
+    info!(
+        port = service.port,
+        "Screenshotr connected — starting capture loop"
+    );
 
     // Version exchange
     send_version_exchange(stream).await?;
@@ -78,7 +81,8 @@ pub async fn capture_loop(
                                 frames = frame_count,
                                 fps = format!("{:.1}", fps),
                                 "{}x{} capture",
-                                width, height
+                                width,
+                                height
                             );
                         }
                     }
@@ -114,7 +118,10 @@ async fn send_screenshot_request(stream: &mut tokio::net::TcpStream) -> anyhow::
         plist::Value::String("DLMessageProcessMessage".to_string()),
         plist::Value::Dictionary({
             let mut d = plist::Dictionary::new();
-            d.insert("MessageType".to_string(), plist::Value::String("ScreenShotRequest".to_string()));
+            d.insert(
+                "MessageType".to_string(),
+                plist::Value::String("ScreenShotRequest".to_string()),
+            );
             d
         }),
     ]);
@@ -133,9 +140,10 @@ async fn recv_screenshot(stream: &mut tokio::net::TcpStream) -> anyhow::Result<V
     if let plist::Value::Array(arr) = value {
         for item in &arr {
             if let plist::Value::Dictionary(dict) = item
-                && let Some(plist::Value::Data(png)) = dict.get("ScreenShotData") {
-                    return Ok(png.clone());
-                }
+                && let Some(plist::Value::Data(png)) = dict.get("ScreenShotData")
+            {
+                return Ok(png.clone());
+            }
         }
     }
 
@@ -143,7 +151,10 @@ async fn recv_screenshot(stream: &mut tokio::net::TcpStream) -> anyhow::Result<V
 }
 
 /// Send a DL message (length-prefixed binary plist).
-async fn send_dl_message(stream: &mut tokio::net::TcpStream, value: &plist::Value) -> anyhow::Result<()> {
+async fn send_dl_message(
+    stream: &mut tokio::net::TcpStream,
+    value: &plist::Value,
+) -> anyhow::Result<()> {
     let mut body = Vec::new();
     value.to_writer_binary(&mut body)?;
 
@@ -164,7 +175,8 @@ async fn recv_message(stream: &mut tokio::net::TcpStream) -> anyhow::Result<Vec<
     if len == 0 {
         return Ok(Vec::new());
     }
-    if len > 50_000_000 { // 50MB max for a screenshot
+    if len > 50_000_000 {
+        // 50MB max for a screenshot
         return Err(anyhow::anyhow!("Message too large: {} bytes", len));
     }
 

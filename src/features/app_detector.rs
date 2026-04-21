@@ -1,7 +1,7 @@
 use super::Frame;
+use chrono::{DateTime, Local};
 use serde::Serialize;
 use std::collections::HashMap;
-use chrono::{DateTime, Local};
 use tracing::info;
 
 /// App detector: identify which iPhone app is running by screen analysis.
@@ -60,24 +60,46 @@ impl AppTracker {
         stats
     }
 
-    pub fn current(&self) -> &str { &self.current_app }
-    pub fn sessions(&self) -> &[AppSession] { &self.sessions }
+    pub fn current(&self) -> &str {
+        &self.current_app
+    }
+    pub fn sessions(&self) -> &[AppSession] {
+        &self.sessions
+    }
 }
 
 /// Simple app detection based on screen content heuristics.
 fn detect_app(frame: &Frame) -> String {
-    if frame.rgba.is_empty() || frame.width == 0 { return "Unknown".to_string(); }
+    if frame.rgba.is_empty() || frame.width == 0 {
+        return "Unknown".to_string();
+    }
 
     // Sample the status bar area (top 44px) for color
-    let status_color = sample_region_avg(&frame.rgba, frame.width, 0, 0, frame.width, 44.min(frame.height));
+    let status_color = sample_region_avg(
+        &frame.rgba,
+        frame.width,
+        0,
+        0,
+        frame.width,
+        44.min(frame.height),
+    );
 
     // Sample the bottom nav bar (bottom 83px)
     let nav_y = frame.height.saturating_sub(83);
-    let nav_color = sample_region_avg(&frame.rgba, frame.width, 0, nav_y, frame.width, 83.min(frame.height));
+    let nav_color = sample_region_avg(
+        &frame.rgba,
+        frame.width,
+        0,
+        nav_y,
+        frame.width,
+        83.min(frame.height),
+    );
 
     // Heuristic detection based on dominant colors
     match (status_color, nav_color) {
-        ((r, _, _), _) if r > 200 && status_color.1 < 80 && status_color.2 < 80 => "Phone (Red)".to_string(),
+        ((r, _, _), _) if r > 200 && status_color.1 < 80 && status_color.2 < 80 => {
+            "Phone (Red)".to_string()
+        }
         (_, (_, g, _)) if g > 200 && nav_color.0 < 80 => "Messages".to_string(),
         ((r, g, b), _) if r < 30 && g < 30 && b < 30 => "Dark Mode App".to_string(),
         ((r, g, b), _) if r > 240 && g > 240 && b > 240 => "Light Mode App".to_string(),
@@ -100,6 +122,12 @@ fn sample_region_avg(rgba: &[u8], w: u32, x: u32, y: u32, rw: u32, rh: u32) -> (
             }
         }
     }
-    if count == 0 { return (0, 0, 0); }
-    ((sum[0] / count) as u8, (sum[1] / count) as u8, (sum[2] / count) as u8)
+    if count == 0 {
+        return (0, 0, 0);
+    }
+    (
+        (sum[0] / count) as u8,
+        (sum[1] / count) as u8,
+        (sum[2] / count) as u8,
+    )
 }

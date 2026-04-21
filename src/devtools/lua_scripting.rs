@@ -1,4 +1,3 @@
-
 /// Lua scripting engine for advanced automation.
 ///
 /// Users can write Lua scripts that access:
@@ -40,7 +39,9 @@ pub mod engine {
             let screen_tbl = lua.create_table().map_err(to_err)?;
             let clipboard_tbl = lua.create_table().map_err(to_err)?;
             lua.globals().set("screen", screen_tbl).map_err(to_err)?;
-            lua.globals().set("clipboard", clipboard_tbl).map_err(to_err)?;
+            lua.globals()
+                .set("clipboard", clipboard_tbl)
+                .map_err(to_err)?;
 
             // screen.wait(ms)
             let wait_fn = lua
@@ -73,12 +74,18 @@ pub mod engine {
 
         /// Execute a Lua code string.
         pub fn execute(&self, code: &str) -> Result<(), String> {
-            self.lua.load(code).exec().map_err(|e| format!("Lua error: {}", e))
+            self.lua
+                .load(code)
+                .exec()
+                .map_err(|e| format!("Lua error: {}", e))
         }
     }
 }
 
 #[cfg(not(feature = "lua"))]
 pub fn run_script(_path: &str) -> Result<(), String> {
-    Err("Lua scripting requires the 'lua' feature flag. Build with: cargo build --features lua".to_string())
+    Err(
+        "Lua scripting requires the 'lua' feature flag. Build with: cargo build --features lua"
+            .to_string(),
+    )
 }

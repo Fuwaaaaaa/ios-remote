@@ -25,7 +25,8 @@ pub fn find_template(
     region: Option<(u32, u32, u32, u32)>,
     threshold: f64,
 ) -> MatchResult {
-    let (search_x, search_y, search_w, search_h) = region.unwrap_or((0, 0, frame.width, frame.height));
+    let (search_x, search_y, search_w, search_h) =
+        region.unwrap_or((0, 0, frame.width, frame.height));
 
     let mut best_score = 0.0f64;
     let mut best_x = 0u32;
@@ -36,9 +37,13 @@ pub fn find_template(
     for sy in (search_y..search_y + search_h - template_h).step_by(step) {
         for sx in (search_x..search_x + search_w - template_w).step_by(step) {
             let score = ncc_score(
-                &frame.rgba, frame.width,
-                template_rgba, template_w, template_h,
-                sx, sy,
+                &frame.rgba,
+                frame.width,
+                template_rgba,
+                template_w,
+                template_h,
+                sx,
+                sy,
             );
 
             if score > best_score {
@@ -49,8 +54,10 @@ pub fn find_template(
                 // Early exit if perfect match
                 if score > 0.98 {
                     return MatchResult {
-                        x: best_x, y: best_y,
-                        score: best_score, matched: true,
+                        x: best_x,
+                        y: best_y,
+                        score: best_score,
+                        matched: true,
                     };
                 }
             }
@@ -67,9 +74,13 @@ pub fn find_template(
 
 /// Normalized cross-correlation between template and frame region.
 fn ncc_score(
-    frame: &[u8], frame_w: u32,
-    template: &[u8], t_w: u32, t_h: u32,
-    offset_x: u32, offset_y: u32,
+    frame: &[u8],
+    frame_w: u32,
+    template: &[u8],
+    t_w: u32,
+    t_h: u32,
+    offset_x: u32,
+    offset_y: u32,
 ) -> f64 {
     let mut sum_ft = 0.0f64;
     let mut sum_ff = 0.0f64;
@@ -93,11 +104,13 @@ fn ncc_score(
             // Grayscale comparison
             let f_gray = (frame[f_idx] as f64 * 0.299
                 + frame[f_idx + 1] as f64 * 0.587
-                + frame[f_idx + 2] as f64 * 0.114) / 255.0;
+                + frame[f_idx + 2] as f64 * 0.114)
+                / 255.0;
 
             let t_gray = (template[t_idx] as f64 * 0.299
                 + template[t_idx + 1] as f64 * 0.587
-                + template[t_idx + 2] as f64 * 0.114) / 255.0;
+                + template[t_idx + 2] as f64 * 0.114)
+                / 255.0;
 
             sum_ft += f_gray * t_gray;
             sum_ff += f_gray * f_gray;

@@ -24,7 +24,10 @@ use std::net::{IpAddr, SocketAddr};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
-#[command(name = "ios-remote", about = "iPhone screen mirroring via USB Type-C (Windows only)")]
+#[command(
+    name = "ios-remote",
+    about = "iPhone screen mirroring via USB Type-C (Windows only)"
+)]
 struct Cli {
     /// Display window name
     #[arg(short, long, default_value = "ios-remote")]
@@ -112,10 +115,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let web_addr = SocketAddr::new(bind_ip, cli.web_port);
-    tracing::info!(
-        "API token (Bearer): {token}",
-        token = &api_token
-    );
+    tracing::info!("API token (Bearer): {token}", token = &api_token);
     if app_config.network.lan_access {
         tracing::warn!(
             bind = %web_addr,
@@ -142,7 +142,9 @@ async fn main() -> anyhow::Result<()> {
     let recorder = features::recording::RecordingController::new(frame_bus.clone());
     if cli.record {
         match recorder.start() {
-            Ok(path) => tracing::info!(file = %path.display(), "Recording enabled → {}", path.display()),
+            Ok(path) => {
+                tracing::info!(file = %path.display(), "Recording enabled → {}", path.display())
+            }
             Err(e) => tracing::warn!(error = %e, "Could not start recording"),
         }
     }
@@ -163,11 +165,10 @@ async fn main() -> anyhow::Result<()> {
             api_token: web_token,
             recorder: web_recorder,
         });
-        let app = ui::api::router(api_state.clone())
-            .route(
-                "/",
-                axum::routing::get(ui::web::dashboard).with_state(api_state),
-            );
+        let app = ui::api::router(api_state.clone()).route(
+            "/",
+            axum::routing::get(ui::web::dashboard).with_state(api_state),
+        );
         match tokio::net::TcpListener::bind(web_addr).await {
             Ok(listener) => {
                 tracing::info!(addr = %web_addr, "Web dashboard: http://{}", web_addr);

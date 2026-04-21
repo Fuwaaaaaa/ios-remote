@@ -11,7 +11,9 @@ pub fn diff_highlight(prev: &Frame, curr: &Frame, threshold: u32) -> Vec<u8> {
 
     for i in 0..total {
         let idx = i * 4;
-        if idx + 2 >= prev.rgba.len() || idx + 2 >= curr.rgba.len() { break; }
+        if idx + 2 >= prev.rgba.len() || idx + 2 >= curr.rgba.len() {
+            break;
+        }
 
         let dr = (prev.rgba[idx] as i32 - curr.rgba[idx] as i32).unsigned_abs();
         let dg = (prev.rgba[idx + 1] as i32 - curr.rgba[idx + 1] as i32).unsigned_abs();
@@ -34,7 +36,9 @@ pub fn diff_score(a: &Frame, b: &Frame) -> f64 {
     let mut diff_sum = 0u64;
     for i in 0..total {
         let idx = i * 4;
-        if idx + 2 >= a.rgba.len() || idx + 2 >= b.rgba.len() { break; }
+        if idx + 2 >= a.rgba.len() || idx + 2 >= b.rgba.len() {
+            break;
+        }
         let dr = (a.rgba[idx] as i64 - b.rgba[idx] as i64).unsigned_abs();
         let dg = (a.rgba[idx + 1] as i64 - b.rgba[idx + 1] as i64).unsigned_abs();
         let db = (a.rgba[idx + 2] as i64 - b.rgba[idx + 2] as i64).unsigned_abs();

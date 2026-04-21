@@ -55,7 +55,10 @@ pub fn configure_firewall() -> Result<(), String> {
     for (name, port, protocol) in &rules {
         let output = std::process::Command::new("netsh")
             .args([
-                "advfirewall", "firewall", "add", "rule",
+                "advfirewall",
+                "firewall",
+                "add",
+                "rule",
                 &format!("name={}", name),
                 "dir=in",
                 "action=allow",
@@ -109,7 +112,9 @@ impl PerfTracker {
 
     pub fn avg_fps(&self, last_n: usize) -> f64 {
         let recent: Vec<_> = self.samples.iter().rev().take(last_n).collect();
-        if recent.is_empty() { return 0.0; }
+        if recent.is_empty() {
+            return 0.0;
+        }
         recent.iter().map(|s| s.fps).sum::<f64>() / recent.len() as f64
     }
 }

@@ -68,7 +68,9 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    pub fn new() -> Self { Self { tasks: Vec::new() } }
+    pub fn new() -> Self {
+        Self { tasks: Vec::new() }
+    }
 
     pub fn add(&mut self, task: ScheduledTask) {
         info!(name = %task.name, "Scheduled task added");
@@ -110,8 +112,7 @@ impl Scheduler {
                     let should_fire = match task.last_fired_instant {
                         None => true,
                         Some(last) => {
-                            now_instant.saturating_duration_since(last).as_secs()
-                                >= *every_secs
+                            now_instant.saturating_duration_since(last).as_secs() >= *every_secs
                         }
                     };
                     if should_fire {
@@ -182,8 +183,7 @@ mod tests {
         assert_eq!(first.len(), 1);
         assert_eq!(second.len(), 0);
         // Force "yesterday" → next check should fire again.
-        s.tasks_mut()[0].last_fired_date =
-            Some(Local::now().date_naive().pred_opt().unwrap());
+        s.tasks_mut()[0].last_fired_date = Some(Local::now().date_naive().pred_opt().unwrap());
         assert_eq!(s.check().len(), 1);
     }
 

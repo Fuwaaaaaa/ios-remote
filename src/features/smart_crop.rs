@@ -30,7 +30,9 @@ pub fn smart_crop(frame: &Frame, bg_threshold: u32) -> CropResult {
     for y in 0..h {
         for x in 0..w {
             let idx = ((y * w + x) * 4) as usize;
-            if idx + 2 >= frame.rgba.len() { continue; }
+            if idx + 2 >= frame.rgba.len() {
+                continue;
+            }
 
             let dr = (frame.rgba[idx] as i32 - bg_color[0] as i32).unsigned_abs();
             let dg = (frame.rgba[idx + 1] as i32 - bg_color[1] as i32).unsigned_abs();
@@ -48,7 +50,10 @@ pub fn smart_crop(frame: &Frame, bg_threshold: u32) -> CropResult {
     // Fallback to full frame if no content detected
     if max_x <= min_x || max_y <= min_y {
         return CropResult {
-            x: 0, y: 0, w, h,
+            x: 0,
+            y: 0,
+            w,
+            h,
             cropped_rgba: frame.rgba.clone(),
         };
     }
@@ -66,7 +71,10 @@ pub fn smart_crop(frame: &Frame, bg_threshold: u32) -> CropResult {
     }
 
     CropResult {
-        x: min_x, y: min_y, w: crop_w, h: crop_h,
+        x: min_x,
+        y: min_y,
+        w: crop_w,
+        h: crop_h,
         cropped_rgba: cropped,
     }
 }
@@ -90,6 +98,12 @@ fn sample_border_color(rgba: &[u8], w: u32, h: u32) -> [u8; 3] {
         }
     }
 
-    if count == 0 { return [0, 0, 0]; }
-    [(sum[0] / count) as u8, (sum[1] / count) as u8, (sum[2] / count) as u8]
+    if count == 0 {
+        return [0, 0, 0];
+    }
+    [
+        (sum[0] / count) as u8,
+        (sum[1] / count) as u8,
+        (sum[2] / count) as u8,
+    ]
 }

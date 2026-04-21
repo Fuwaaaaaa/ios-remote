@@ -19,13 +19,24 @@ pub struct CursorOverlay {
 
 impl CursorOverlay {
     pub fn new() -> Self {
-        Self { style: CursorStyle::Crosshair, color: [255, 255, 255], x: 0, y: 0, visible: true }
+        Self {
+            style: CursorStyle::Crosshair,
+            color: [255, 255, 255],
+            x: 0,
+            y: 0,
+            visible: true,
+        }
     }
 
-    pub fn update_pos(&mut self, x: u32, y: u32) { self.x = x; self.y = y; }
+    pub fn update_pos(&mut self, x: u32, y: u32) {
+        self.x = x;
+        self.y = y;
+    }
 
     pub fn draw(&self, rgba: &mut [u8], w: u32, h: u32) {
-        if !self.visible { return; }
+        if !self.visible {
+            return;
+        }
         match self.style {
             CursorStyle::Crosshair => self.draw_crosshair(rgba, w, h),
             CursorStyle::Circle { radius } => self.draw_circle(rgba, w, h, radius),
@@ -70,13 +81,19 @@ impl CursorOverlay {
         // Simple arrow pointing down-right
         for d in 0..12u32 {
             self.set_px(rgba, w, h, self.x + d, self.y + d);
-            if d < 6 { self.set_px(rgba, w, h, self.x, self.y + d); }
-            if d < 6 { self.set_px(rgba, w, h, self.x + d, self.y); }
+            if d < 6 {
+                self.set_px(rgba, w, h, self.x, self.y + d);
+            }
+            if d < 6 {
+                self.set_px(rgba, w, h, self.x + d, self.y);
+            }
         }
     }
 
     fn set_px(&self, rgba: &mut [u8], w: u32, h: u32, x: u32, y: u32) {
-        if x >= w || y >= h { return; }
+        if x >= w || y >= h {
+            return;
+        }
         let idx = ((y * w + x) * 4) as usize;
         if idx + 2 < rgba.len() {
             rgba[idx] = self.color[0];
@@ -87,12 +104,28 @@ impl CursorOverlay {
 }
 
 /// Window snap: snap display window to screen edges.
-pub fn snap_position(window_x: i32, window_y: i32, window_w: u32, window_h: u32, screen_w: u32, screen_h: u32, margin: i32) -> (i32, i32) {
+pub fn snap_position(
+    window_x: i32,
+    window_y: i32,
+    window_w: u32,
+    window_h: u32,
+    screen_w: u32,
+    screen_h: u32,
+    margin: i32,
+) -> (i32, i32) {
     let mut x = window_x;
     let mut y = window_y;
-    if x.abs() < margin { x = 0; }
-    if y.abs() < margin { y = 0; }
-    if ((x + window_w as i32) - screen_w as i32).abs() < margin { x = screen_w as i32 - window_w as i32; }
-    if ((y + window_h as i32) - screen_h as i32).abs() < margin { y = screen_h as i32 - window_h as i32; }
+    if x.abs() < margin {
+        x = 0;
+    }
+    if y.abs() < margin {
+        y = 0;
+    }
+    if ((x + window_w as i32) - screen_w as i32).abs() < margin {
+        x = screen_w as i32 - window_w as i32;
+    }
+    if ((y + window_h as i32) - screen_h as i32).abs() < margin {
+        y = screen_h as i32 - window_h as i32;
+    }
     (x, y)
 }

@@ -85,12 +85,18 @@ impl WdaClient {
     }
 
     /// Swipe from `(x1,y1)` to `(x2,y2)` over `duration_ms`.
-    pub fn swipe(&self, x1: u32, y1: u32, x2: u32, y2: u32, duration_ms: u64) -> Result<(), WdaError> {
+    pub fn swipe(
+        &self,
+        x1: u32,
+        y1: u32,
+        x2: u32,
+        y2: u32,
+        duration_ms: u64,
+    ) -> Result<(), WdaError> {
         let session = self.ensure_session()?;
         let seconds = duration_ms as f64 / 1000.0;
-        let body = format!(
-            r#"{{"fromX":{x1},"fromY":{y1},"toX":{x2},"toY":{y2},"duration":{seconds}}}"#
-        );
+        let body =
+            format!(r#"{{"fromX":{x1},"fromY":{y1},"toX":{x2},"toY":{y2},"duration":{seconds}}}"#);
         self.post_json(
             &format!("/session/{session}/wda/dragfromtoforduration"),
             &body,
@@ -140,8 +146,8 @@ impl WdaClient {
 /// Read the WDA endpoint from `IOS_REMOTE_WDA_URL`, defaulting to the common
 /// forwarded local port `http://127.0.0.1:8100`.
 pub fn default_wda_client() -> WdaClient {
-    let url = std::env::var("IOS_REMOTE_WDA_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:8100".to_string());
+    let url =
+        std::env::var("IOS_REMOTE_WDA_URL").unwrap_or_else(|_| "http://127.0.0.1:8100".to_string());
     WdaClient::new(url)
 }
 
@@ -196,7 +202,10 @@ mod tests {
         // Must match one of our typed variants — never panic.
         let is_expected = matches!(
             err.unwrap(),
-            WdaError::Unreachable(_) | WdaError::BadResponse(_) | WdaError::ParseError(_) | WdaError::Curl(_)
+            WdaError::Unreachable(_)
+                | WdaError::BadResponse(_)
+                | WdaError::ParseError(_)
+                | WdaError::Curl(_)
         );
         assert!(is_expected);
     }

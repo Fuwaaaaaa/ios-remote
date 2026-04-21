@@ -1,4 +1,4 @@
-use super::{frame_analysis, Frame};
+use super::{Frame, frame_analysis};
 use chrono::Local;
 use std::io::Write;
 use std::sync::Arc;
@@ -9,17 +9,21 @@ use tracing::{info, warn};
 ///
 /// Saves H.264 NALUs only when motion is detected above a threshold.
 /// Dramatically reduces file size for mostly-static screens.
-pub async fn motion_recording(
-    mut rx: broadcast::Receiver<Arc<Frame>>,
-    motion_threshold: f64,
-) {
+pub async fn motion_recording(mut rx: broadcast::Receiver<Arc<Frame>>, motion_threshold: f64) {
     let dir = "recordings";
     let _ = std::fs::create_dir_all(dir);
 
-    let filename = format!("{}/motion_{}.h264", dir, Local::now().format("%Y%m%d_%H%M%S"));
+    let filename = format!(
+        "{}/motion_{}.h264",
+        dir,
+        Local::now().format("%Y%m%d_%H%M%S")
+    );
     let mut file = match std::fs::File::create(&filename) {
         Ok(f) => f,
-        Err(e) => { warn!(error = %e, "Failed to create motion recording file"); return; }
+        Err(e) => {
+            warn!(error = %e, "Failed to create motion recording file");
+            return;
+        }
     };
 
     info!(file = %filename, threshold = motion_threshold, "Motion recording started");

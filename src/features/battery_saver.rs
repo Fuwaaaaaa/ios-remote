@@ -36,8 +36,16 @@ impl BatterySaver {
         };
     }
 
-    pub fn should_limit(&self) -> bool { self.enabled && self.on_battery }
-    pub fn target_fps(&self) -> u32 { if self.should_limit() { self.fps_cap } else { 60 } }
+    pub fn should_limit(&self) -> bool {
+        self.enabled && self.on_battery
+    }
+    pub fn target_fps(&self) -> u32 {
+        if self.should_limit() {
+            self.fps_cap
+        } else {
+            60
+        }
+    }
 }
 
 /// Web dashboard API token authentication.
@@ -62,7 +70,9 @@ impl ApiAuth {
     }
 
     pub fn validate(&self, header: &str) -> bool {
-        if !self.enabled { return true; }
+        if !self.enabled {
+            return true;
+        }
         let token = header.strip_prefix("Bearer ").unwrap_or(header);
         self.tokens.iter().any(|t| t == token)
     }

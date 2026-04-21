@@ -1,4 +1,4 @@
-use super::wda_client::{default_wda_client, WdaClient};
+use super::wda_client::{WdaClient, default_wda_client};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -24,13 +24,20 @@ pub enum MacroAction {
     Tap { x: u32, y: u32, delay_ms: u64 },
     /// Swipe from (x1,y1) to (x2,y2) over duration_ms
     Swipe {
-        x1: u32, y1: u32,
-        x2: u32, y2: u32,
+        x1: u32,
+        y1: u32,
+        x2: u32,
+        y2: u32,
         duration_ms: u64,
         delay_ms: u64,
     },
     /// Long press at coordinates for duration_ms
-    LongPress { x: u32, y: u32, duration_ms: u64, delay_ms: u64 },
+    LongPress {
+        x: u32,
+        y: u32,
+        duration_ms: u64,
+        delay_ms: u64,
+    },
     /// Wait before next action
     Wait { duration_ms: u64 },
     /// Take a screenshot
@@ -79,14 +86,26 @@ impl Macro {
                     info!(step = i, x, y, "Macro: tap");
                     client.tap(*x, *y).map_err(|e| e.to_string())?;
                 }
-                MacroAction::Swipe { x1, y1, x2, y2, duration_ms, delay_ms } => {
+                MacroAction::Swipe {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    duration_ms,
+                    delay_ms,
+                } => {
                     tokio::time::sleep(std::time::Duration::from_millis(*delay_ms)).await;
                     info!(step = i, "Macro: swipe ({},{})→({},{})", x1, y1, x2, y2);
                     client
                         .swipe(*x1, *y1, *x2, *y2, *duration_ms)
                         .map_err(|e| e.to_string())?;
                 }
-                MacroAction::LongPress { x, y, duration_ms, delay_ms } => {
+                MacroAction::LongPress {
+                    x,
+                    y,
+                    duration_ms,
+                    delay_ms,
+                } => {
                     tokio::time::sleep(std::time::Duration::from_millis(*delay_ms)).await;
                     info!(step = i, x, y, duration_ms, "Macro: long press");
                     client
@@ -99,16 +118,29 @@ impl Macro {
                 }
                 MacroAction::Screenshot { delay_ms } => {
                     tokio::time::sleep(std::time::Duration::from_millis(*delay_ms)).await;
-                    info!(step = i, "Macro: screenshot (delegated to screenshot feature)");
+                    info!(
+                        step = i,
+                        "Macro: screenshot (delegated to screenshot feature)"
+                    );
                     // Actual frame grab is owned by screenshot::save_frame via
                     // the API layer; here we just mark the intent so replays
                     // can time screenshots relative to input.
                 }
-                MacroAction::WaitForScreen { template_path, timeout_ms: _, region: _ } => {
+                MacroAction::WaitForScreen {
+                    template_path,
+                    timeout_ms: _,
+                    region: _,
+                } => {
                     warn!(step = i, template = %template_path, "Macro: WaitForScreen not yet implemented — skipping");
                 }
-                MacroAction::Repeat { count, actions_back: _ } => {
-                    warn!(step = i, count, "Macro: Repeat not yet implemented — skipping");
+                MacroAction::Repeat {
+                    count,
+                    actions_back: _,
+                } => {
+                    warn!(
+                        step = i,
+                        count, "Macro: Repeat not yet implemented — skipping"
+                    );
                 }
             }
         }

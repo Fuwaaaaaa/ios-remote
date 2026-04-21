@@ -4,7 +4,9 @@ use tracing::info;
 ///
 /// Uses Windows SAPI (Speech API) via PowerShell.
 pub fn speak(text: &str) -> Result<(), String> {
-    if text.is_empty() { return Ok(()); }
+    if text.is_empty() {
+        return Ok(());
+    }
 
     // Sanitize text for PowerShell (escape quotes)
     let safe = text.replace('\'', "''").replace('\n', " ");

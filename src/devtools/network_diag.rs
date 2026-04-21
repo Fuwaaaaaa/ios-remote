@@ -15,7 +15,9 @@ pub struct NetworkStats {
 
 /// Measure round-trip latency to a target IP using UDP echo.
 pub async fn measure_latency(target_ip: &str, count: u32) -> Result<NetworkStats, String> {
-    let socket = UdpSocket::bind("0.0.0.0:0").await.map_err(|e| e.to_string())?;
+    let socket = UdpSocket::bind("0.0.0.0:0")
+        .await
+        .map_err(|e| e.to_string())?;
     let target = format!("{}:7010", target_ip); // NTP port as echo target
 
     let mut rtts = Vec::new();
@@ -25,7 +27,10 @@ pub async fn measure_latency(target_ip: &str, count: u32) -> Result<NetworkStats
         let payload = format!("PING:{}", i);
         let start = Instant::now();
 
-        socket.send_to(payload.as_bytes(), &target).await.map_err(|e| e.to_string())?;
+        socket
+            .send_to(payload.as_bytes(), &target)
+            .await
+            .map_err(|e| e.to_string())?;
 
         let mut buf = [0u8; 64];
         match tokio::time::timeout(Duration::from_millis(1000), socket.recv_from(&mut buf)).await {
@@ -105,7 +110,9 @@ impl BandwidthThrottle {
 
     pub fn usage_percent(&self) -> f64 {
         let limit_bytes = (self.limit_kbps * 1024 / 8) as f64;
-        if limit_bytes == 0.0 { return 0.0; }
+        if limit_bytes == 0.0 {
+            return 0.0;
+        }
         (self.bytes_this_second as f64 / limit_bytes) * 100.0
     }
 }

@@ -4,21 +4,24 @@ use tracing::info;
 ///
 /// One-key workflow: capture frame → PNG → upload to Imgur → URL in clipboard.
 pub fn upload_to_imgur(png_path: &str) -> Result<String, String> {
-    let client_id = std::env::var("IMGUR_CLIENT_ID")
-        .unwrap_or_else(|_| "anonymous".to_string());
+    let client_id = std::env::var("IMGUR_CLIENT_ID").unwrap_or_else(|_| "anonymous".to_string());
 
     let output = std::process::Command::new("curl")
         .args([
-            "-s", "-X", "POST",
+            "-s",
+            "-X",
+            "POST",
             "https://api.imgur.com/3/image",
-            "-H", &format!("Authorization: Client-ID {}", client_id),
-            "-F", &format!("image=@{}", png_path),
+            "-H",
+            &format!("Authorization: Client-ID {}", client_id),
+            "-F",
+            &format!("image=@{}", png_path),
         ])
         .output()
         .map_err(|e| format!("curl failed: {}", e))?;
 
-    let resp: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("JSON parse error: {}", e))?;
+    let resp: serde_json::Value =
+        serde_json::from_slice(&output.stdout).map_err(|e| format!("JSON parse error: {}", e))?;
 
     if let Some(link) = resp["data"]["link"].as_str() {
         // Copy URL to clipboard

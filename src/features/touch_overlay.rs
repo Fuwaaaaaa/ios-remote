@@ -31,18 +31,44 @@ pub fn draw_overlays(rgba: &mut [u8], width: u32, height: u32, elements: &[Overl
             }
             OverlayElement::SwipeTrail { points } => {
                 for window in points.windows(2) {
-                    draw_line(rgba, width, height, window[0], window[1], [255, 255, 100], 0.6);
+                    draw_line(
+                        rgba,
+                        width,
+                        height,
+                        window[0],
+                        window[1],
+                        [255, 255, 100],
+                        0.6,
+                    );
                 }
             }
             OverlayElement::LongPressRing { x, y, progress } => {
                 let radius = 20;
-                draw_circle(rgba, width, height, *x, *y, radius, [255, 100, 100], *progress);
+                draw_circle(
+                    rgba,
+                    width,
+                    height,
+                    *x,
+                    *y,
+                    radius,
+                    [255, 100, 100],
+                    *progress,
+                );
             }
         }
     }
 }
 
-fn draw_circle(rgba: &mut [u8], w: u32, h: u32, cx: u32, cy: u32, r: u32, color: [u8; 3], alpha: f32) {
+fn draw_circle(
+    rgba: &mut [u8],
+    w: u32,
+    h: u32,
+    cx: u32,
+    cy: u32,
+    r: u32,
+    color: [u8; 3],
+    alpha: f32,
+) {
     let r2 = (r * r) as i64;
     let ri2 = ((r.saturating_sub(2)) * (r.saturating_sub(2))) as i64;
 
@@ -68,7 +94,15 @@ fn draw_circle(rgba: &mut [u8], w: u32, h: u32, cx: u32, cy: u32, r: u32, color:
     }
 }
 
-fn draw_line(rgba: &mut [u8], w: u32, h: u32, from: (u32, u32), to: (u32, u32), color: [u8; 3], alpha: f32) {
+fn draw_line(
+    rgba: &mut [u8],
+    w: u32,
+    h: u32,
+    from: (u32, u32),
+    to: (u32, u32),
+    color: [u8; 3],
+    alpha: f32,
+) {
     // Bresenham's line algorithm
     let (mut x0, mut y0) = (from.0 as i32, from.1 as i32);
     let (x1, y1) = (to.0 as i32, to.1 as i32);

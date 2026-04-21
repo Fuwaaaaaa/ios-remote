@@ -1,13 +1,13 @@
 use crate::config::{AppConfig, ConnectionHistory};
 use crate::features::recording::RecordingController;
-use crate::features::{screenshot, FrameBus};
+use crate::features::{FrameBus, screenshot};
 use axum::{
+    Router,
     extract::State,
     http::{Request, StatusCode},
     middleware::{self, Next},
     response::{Json, Response},
     routing::{get, post},
-    Router,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -42,8 +42,6 @@ pub struct StreamStats {
 /// Build the REST API router. All /api/* routes are protected by a bearer
 /// token middleware derived from `state.api_token`.
 pub fn router(state: Arc<ApiState>) -> Router {
-    
-
     Router::new()
         // Status
         .route("/api/status", get(get_status))
@@ -64,7 +62,10 @@ pub fn router(state: Arc<ApiState>) -> Router {
         // Macros
         .route("/api/macros", get(list_macros))
         .route("/api/macros/run", post(run_macro))
-        .route_layer(middleware::from_fn_with_state(state.clone(), require_bearer))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_bearer,
+        ))
         .with_state(state)
 }
 
@@ -91,10 +92,7 @@ async fn require_bearer(
     let query_ok = req
         .uri()
         .query()
-        .and_then(|q| {
-            q.split('&')
-                .find_map(|p| p.strip_prefix("token="))
-        })
+        .and_then(|q| q.split('&').find_map(|p| p.strip_prefix("token=")))
         .map(|t| constant_time_eq(t.as_bytes(), state.api_token.as_bytes()))
         .unwrap_or(false);
 
@@ -134,17 +132,17 @@ async fn get_stats(State(state): State<Arc<ApiState>>) -> Json<StreamStats> {
     Json(stats.clone())
 }
 
-async fn take_screenshot(State(state): State<Arc<ApiState>>) -> Result<Json<serde_json::Value>, StatusCode> {
+async fn take_screenshot(
+    State(state): State<Arc<ApiState>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
     match state.frame_bus.latest_frame() {
-        Some(frame) => {
-            match screenshot::save_frame(&frame) {
-                Ok(path) => Ok(Json(serde_json::json!({ "path": path }))),
-                Err(e) => {
-                    tracing::warn!(error = %e, "Screenshot API failed");
-                    Err(StatusCode::INTERNAL_SERVER_ERROR)
-                }
+        Some(frame) => match screenshot::save_frame(&frame) {
+            Ok(path) => Ok(Json(serde_json::json!({ "path": path }))),
+            Err(e) => {
+                tracing::warn!(error = %e, "Screenshot API failed");
+                Err(StatusCode::INTERNAL_SERVER_ERROR)
             }
-        }
+        },
         None => Err(StatusCode::SERVICE_UNAVAILABLE),
     }
 }
@@ -193,14 +191,14 @@ async fn get_history(State(state): State<Arc<ApiState>>) -> Json<ConnectionHisto
     Json(history.clone())
 }
 
-async fn run_ocr(State(state): State<Arc<ApiState>>) -> Result<Json<serde_json::Value>, StatusCode> {
+async fn run_ocr(
+    State(state): State<Arc<ApiState>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
     match state.frame_bus.latest_frame() {
-        Some(frame) => {
-            match crate::features::ocr::extract_text(&frame, None) {
-                Ok(text) => Ok(Json(serde_json::json!({ "text": text }))),
-                Err(e) => Ok(Json(serde_json::json!({ "error": e }))),
-            }
-        }
+        Some(frame) => match crate::features::ocr::extract_text(&frame, None) {
+            Ok(text) => Ok(Json(serde_json::json!({ "text": text }))),
+            Err(e) => Ok(Json(serde_json::json!({ "error": e }))),
+        },
         None => Err(StatusCode::SERVICE_UNAVAILABLE),
     }
 }
@@ -239,7 +237,9 @@ async fn run_macro(Json(req): Json<MacroRunRequest>) -> Json<serde_json::Value> 
     let path = std::path::Path::new("macros").join(format!("{}.json", req.name));
     match crate::features::macros::Macro::load(&path) {
         Ok(m) => {
-            tokio::spawn(async move { let _ = m.execute().await; });
+            tokio::spawn(async move {
+                let _ = m.execute().await;
+            });
             Json(serde_json::json!({ "status": "started", "name": req.name }))
         }
         Err(e) => Json(serde_json::json!({ "error": e })),

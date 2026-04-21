@@ -19,7 +19,9 @@ pub struct DeviceManager {
 
 impl DeviceManager {
     pub fn new() -> Self {
-        Self { devices: Vec::new() }
+        Self {
+            devices: Vec::new(),
+        }
     }
 
     pub fn add(&mut self, dev: ConnectedDevice) {

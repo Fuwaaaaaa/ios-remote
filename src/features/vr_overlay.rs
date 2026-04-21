@@ -17,8 +17,8 @@ pub struct VrOverlay {
 impl VrOverlay {
     pub fn new() -> Self {
         Self {
-            width: 0.5,     // 50cm wide panel
-            distance: 1.5,  // 1.5m in front
+            width: 0.5,    // 50cm wide panel
+            distance: 1.5, // 1.5m in front
         }
     }
 
@@ -44,8 +44,10 @@ impl VrOverlay {
 
         #[cfg(not(feature = "vr"))]
         {
-            info!("VR overlay: compiled without 'vr' feature. \
-                   Add `openvr` to Cargo.toml and enable 'vr' feature to use.");
+            info!(
+                "VR overlay: compiled without 'vr' feature. \
+                   Add `openvr` to Cargo.toml and enable 'vr' feature to use."
+            );
 
             // Drain frames to avoid broadcast lag
             loop {

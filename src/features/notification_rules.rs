@@ -38,13 +38,18 @@ pub struct NotificationRuleEngine {
 }
 
 impl NotificationRuleEngine {
-    pub fn new() -> Self { Self { rules: Vec::new() } }
+    pub fn new() -> Self {
+        Self { rules: Vec::new() }
+    }
 
-    pub fn add_rule(&mut self, rule: NotificationRule) { self.rules.push(rule); }
+    pub fn add_rule(&mut self, rule: NotificationRule) {
+        self.rules.push(rule);
+    }
 
     /// Evaluate rules against a notification text. Returns matching actions.
     pub fn evaluate(&self, text: &str) -> Vec<RuleAction> {
-        self.rules.iter()
+        self.rules
+            .iter()
             .filter(|r| r.enabled && Self::matches(&r.condition, text))
             .map(|r| r.action.clone())
             .collect()

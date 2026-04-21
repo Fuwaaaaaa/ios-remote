@@ -4,7 +4,12 @@
 /// we detect the rotation and can auto-adjust the display window.
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Orientation { Portrait, Landscape, PortraitUpsideDown, LandscapeRight }
+pub enum Orientation {
+    Portrait,
+    Landscape,
+    PortraitUpsideDown,
+    LandscapeRight,
+}
 
 pub struct RotationDetector {
     current: Orientation,
@@ -14,16 +19,26 @@ pub struct RotationDetector {
 
 impl RotationDetector {
     pub fn new() -> Self {
-        Self { current: Orientation::Portrait, last_width: 0, last_height: 0 }
+        Self {
+            current: Orientation::Portrait,
+            last_width: 0,
+            last_height: 0,
+        }
     }
 
     /// Update with new frame dimensions. Returns Some(new_orientation) if changed.
     pub fn update(&mut self, width: u32, height: u32) -> Option<Orientation> {
-        if width == self.last_width && height == self.last_height { return None; }
+        if width == self.last_width && height == self.last_height {
+            return None;
+        }
         self.last_width = width;
         self.last_height = height;
 
-        let new = if width > height { Orientation::Landscape } else { Orientation::Portrait };
+        let new = if width > height {
+            Orientation::Landscape
+        } else {
+            Orientation::Portrait
+        };
         if new != self.current {
             let old = self.current;
             self.current = new;
@@ -34,7 +49,9 @@ impl RotationDetector {
         }
     }
 
-    pub fn current(&self) -> Orientation { self.current }
+    pub fn current(&self) -> Orientation {
+        self.current
+    }
 }
 
 /// Mirror flip: horizontal or vertical flip of the frame.
@@ -44,7 +61,9 @@ pub fn flip_horizontal(rgba: &mut [u8], width: u32, height: u32) {
         for x in 0..w / 2 {
             let left = (y * w + x) * 4;
             let right = (y * w + (w - 1 - x)) * 4;
-            for c in 0..4 { rgba.swap(left + c, right + c); }
+            for c in 0..4 {
+                rgba.swap(left + c, right + c);
+            }
         }
     }
 }
@@ -56,7 +75,9 @@ pub fn flip_vertical(rgba: &mut [u8], width: u32, height: u32) {
     for y in 0..h / 2 {
         let top = y * row_bytes;
         let bot = (h - 1 - y) * row_bytes;
-        for i in 0..row_bytes { rgba.swap(top + i, bot + i); }
+        for i in 0..row_bytes {
+            rgba.swap(top + i, bot + i);
+        }
     }
 }
 
@@ -66,7 +87,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CropPreset {
     pub name: String,
-    pub x: u32, pub y: u32, pub w: u32, pub h: u32,
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
 }
 
 pub struct CropPresets {
@@ -74,10 +98,20 @@ pub struct CropPresets {
 }
 
 impl CropPresets {
-    pub fn new() -> Self { Self { presets: Vec::new() } }
+    pub fn new() -> Self {
+        Self {
+            presets: Vec::new(),
+        }
+    }
 
     pub fn add(&mut self, name: &str, x: u32, y: u32, w: u32, h: u32) {
-        self.presets.push(CropPreset { name: name.to_string(), x, y, w, h });
+        self.presets.push(CropPreset {
+            name: name.to_string(),
+            x,
+            y,
+            w,
+            h,
+        });
     }
 
     pub fn get(&self, name: &str) -> Option<&CropPreset> {

@@ -67,7 +67,13 @@ impl Watermark {
             }
         }
 
-        Self { rgba, width: w, height: h, position, opacity }
+        Self {
+            rgba,
+            width: w,
+            height: h,
+            position,
+            opacity,
+        }
     }
 
     /// Composite watermark onto an RGBA frame buffer.
@@ -91,15 +97,21 @@ impl Watermark {
             for wx in 0..self.width {
                 let fx = ox + wx;
                 let fy = oy + wy;
-                if fx >= frame_w || fy >= frame_h { continue; }
+                if fx >= frame_w || fy >= frame_h {
+                    continue;
+                }
 
                 let w_idx = ((wy * self.width + wx) * 4) as usize;
                 let f_idx = ((fy * frame_w + fx) * 4) as usize;
 
-                if w_idx + 3 >= self.rgba.len() || f_idx + 3 >= frame_rgba.len() { continue; }
+                if w_idx + 3 >= self.rgba.len() || f_idx + 3 >= frame_rgba.len() {
+                    continue;
+                }
 
                 let alpha = (self.rgba[w_idx + 3] as f32 / 255.0) * self.opacity;
-                if alpha < 0.01 { continue; }
+                if alpha < 0.01 {
+                    continue;
+                }
 
                 frame_rgba[f_idx] = blend(frame_rgba[f_idx], self.rgba[w_idx], alpha);
                 frame_rgba[f_idx + 1] = blend(frame_rgba[f_idx + 1], self.rgba[w_idx + 1], alpha);

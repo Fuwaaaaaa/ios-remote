@@ -8,8 +8,8 @@ pub mod battery_saver;
 pub mod benchmark;
 pub mod clipboard_history;
 pub mod clipboard_sync;
-pub mod custom_cursor;
 pub mod color_picker;
+pub mod custom_cursor;
 pub mod design_overlay;
 pub mod device_frame;
 pub mod display;
@@ -20,9 +20,9 @@ pub mod gestures;
 pub mod gif_capture;
 pub mod heatmap;
 pub mod i18n;
+pub mod imgur_share;
 pub mod keyboard_input;
 pub mod macros;
-pub mod wda_client;
 pub mod mouse_gesture;
 pub mod multi_device;
 pub mod notification_capture;
@@ -36,6 +36,7 @@ pub mod qr_generator;
 pub mod qr_scanner;
 pub mod recording;
 pub mod ruler;
+pub mod scheduler;
 pub mod screen_diff;
 pub mod screen_rotation;
 pub mod screensaver;
@@ -43,7 +44,6 @@ pub mod screenshot;
 pub mod session_replay;
 pub mod sharing;
 pub mod smart_crop;
-pub mod scheduler;
 pub mod smart_recording;
 pub mod sound_notify;
 pub mod stats_export;
@@ -60,8 +60,8 @@ pub mod video_filter;
 pub mod voice_command;
 pub mod vr_overlay;
 pub mod watermark;
+pub mod wda_client;
 pub mod webhook;
-pub mod imgur_share;
 pub mod zoom;
 
 use std::sync::{Arc, Mutex};
@@ -85,7 +85,10 @@ pub struct FrameBus {
 impl FrameBus {
     pub fn new() -> Self {
         let (sender, _) = broadcast::channel(8);
-        Self { sender, latest: Arc::new(Mutex::new(None)) }
+        Self {
+            sender,
+            latest: Arc::new(Mutex::new(None)),
+        }
     }
     pub fn publish(&self, frame: Frame) {
         let frame = Arc::new(frame);
@@ -97,7 +100,9 @@ impl FrameBus {
         }
         let _ = self.sender.send(frame);
     }
-    pub fn subscribe(&self) -> broadcast::Receiver<Arc<Frame>> { self.sender.subscribe() }
+    pub fn subscribe(&self) -> broadcast::Receiver<Arc<Frame>> {
+        self.sender.subscribe()
+    }
     pub fn latest_frame(&self) -> Option<Arc<Frame>> {
         self.latest
             .lock()

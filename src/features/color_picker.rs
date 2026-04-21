@@ -34,7 +34,10 @@ pub fn pick_color(frame: &Frame, x: u32, y: u32) -> Option<PickedColor> {
     let (h, s, l) = rgb_to_hsl(r, g, b);
 
     Some(PickedColor {
-        r, g, b, a,
+        r,
+        g,
+        b,
+        a,
         hex: format!("#{:02X}{:02X}{:02X}", r, g, b),
         rgb: format!("rgb({}, {}, {})", r, g, b),
         hsl: format!("hsl({:.0}, {:.0}%, {:.0}%)", h, s * 100.0, l * 100.0),
@@ -55,7 +58,11 @@ fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
     }
 
     let d = max - min;
-    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let s = if l > 0.5 {
+        d / (2.0 - max - min)
+    } else {
+        d / (max + min)
+    };
 
     let h = if (max - r).abs() < f32::EPSILON {
         ((g - b) / d + if g < b { 6.0 } else { 0.0 }) * 60.0
@@ -69,7 +76,14 @@ fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
 }
 
 /// Draw color picker crosshair + info at mouse position.
-pub fn draw_picker_overlay(rgba: &mut [u8], width: u32, height: u32, x: u32, y: u32, color: &PickedColor) {
+pub fn draw_picker_overlay(
+    rgba: &mut [u8],
+    width: u32,
+    height: u32,
+    x: u32,
+    y: u32,
+    color: &PickedColor,
+) {
     let w = width;
 
     // Crosshair lines (10px each direction)

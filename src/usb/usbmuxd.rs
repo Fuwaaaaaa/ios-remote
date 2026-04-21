@@ -40,11 +40,16 @@ pub struct UsbmuxdClient {
 impl UsbmuxdClient {
     /// Connect to the local usbmuxd daemon.
     pub async fn connect() -> anyhow::Result<Self> {
-        let stream = TcpStream::connect(("127.0.0.1", USBMUXD_PORT)).await
-            .map_err(|e| anyhow::anyhow!(
-                "Cannot connect to usbmuxd (127.0.0.1:{}). \
-                 Is iTunes or Apple Devices app installed? Error: {}", USBMUXD_PORT, e
-            ))?;
+        let stream = TcpStream::connect(("127.0.0.1", USBMUXD_PORT))
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Cannot connect to usbmuxd (127.0.0.1:{}). \
+                 Is iTunes or Apple Devices app installed? Error: {}",
+                    USBMUXD_PORT,
+                    e
+                )
+            })?;
 
         info!("Connected to usbmuxd at 127.0.0.1:{}", USBMUXD_PORT);
 
@@ -68,20 +73,24 @@ impl UsbmuxdClient {
 
         if let Some(plist::Value::Array(device_list)) = response.get("DeviceList") {
             for entry in device_list {
-                if let Some(props) = entry.as_dictionary()
+                if let Some(props) = entry
+                    .as_dictionary()
                     .and_then(|d| d.get("Properties"))
                     .and_then(|p| p.as_dictionary())
                 {
-                    let device_id = props.get("DeviceID")
+                    let device_id = props
+                        .get("DeviceID")
                         .and_then(|v| v.as_unsigned_integer())
                         .unwrap_or(0) as u32;
 
-                    let udid = props.get("SerialNumber")
+                    let udid = props
+                        .get("SerialNumber")
                         .and_then(|v| v.as_string())
                         .unwrap_or("unknown")
                         .to_string();
 
-                    let conn_type = props.get("ConnectionType")
+                    let conn_type = props
+                        .get("ConnectionType")
                         .and_then(|v| v.as_string())
                         .unwrap_or("USB")
                         .to_string();
@@ -120,7 +129,8 @@ impl UsbmuxdClient {
         self.send_plist(request.as_bytes()).await?;
         let response = self.recv_plist().await?;
 
-        let result = response.get("Number")
+        let result = response
+            .get("Number")
             .and_then(|v| v.as_unsigned_integer())
             .unwrap_or(999);
 
@@ -128,7 +138,10 @@ impl UsbmuxdClient {
             info!(device_id, port, "USB tunnel connected");
             Ok(())
         } else {
-            Err(anyhow::anyhow!("Connect failed with result code {}", result))
+            Err(anyhow::anyhow!(
+                "Connect failed with result code {}",
+                result
+            ))
         }
     }
 
@@ -204,9 +217,13 @@ fn plist_xml(pairs: &[(&str, &str)]) -> Vec<u8> {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-"#);
+"#,
+    );
     for (key, value) in pairs {
-        xml.push_str(&format!("    <key>{}</key><string>{}</string>\n", key, value));
+        xml.push_str(&format!(
+            "    <key>{}</key><string>{}</string>\n",
+            key, value
+        ));
     }
     xml.push_str("</dict>\n</plist>");
     xml.into_bytes()

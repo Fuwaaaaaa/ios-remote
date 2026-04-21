@@ -18,7 +18,10 @@ struct ReportEntry {
 
 impl PdfReport {
     pub fn new(title: &str) -> Self {
-        Self { title: title.to_string(), entries: Vec::new() }
+        Self {
+            title: title.to_string(),
+            entries: Vec::new(),
+        }
     }
 
     pub fn add_screenshot(&mut self, path: &str, caption: &str, ocr_text: Option<&str>) {
@@ -31,7 +34,8 @@ impl PdfReport {
 
     /// Generate HTML report (can be printed to PDF from browser).
     pub fn generate_html(&self) -> String {
-        let mut html = format!(r#"<!DOCTYPE html>
+        let mut html = format!(
+            r#"<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>{}</title>
 <style>
 body {{ font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }}
@@ -44,14 +48,23 @@ h1 {{ color: #333; border-bottom: 2px solid #007AFF; padding-bottom: 10px; }}
 </style></head><body>
 <h1>{}</h1>
 <p class="timestamp">Generated: {}</p>
-"#, self.title, self.title, Local::now().format("%Y-%m-%d %H:%M:%S"));
+"#,
+            self.title,
+            self.title,
+            Local::now().format("%Y-%m-%d %H:%M:%S")
+        );
 
         for (i, entry) in self.entries.iter().enumerate() {
-            html.push_str(&format!(r#"
+            html.push_str(&format!(
+                r#"
 <div class="entry">
 <h3>#{} — {}</h3>
 <img src="{}" alt="Screenshot">
-"#, i + 1, entry.caption, entry.screenshot_path));
+"#,
+                i + 1,
+                entry.caption,
+                entry.screenshot_path
+            ));
 
             if let Some(ref text) = entry.ocr_text {
                 html.push_str(&format!(r#"<div class="ocr">{}</div>"#, text));

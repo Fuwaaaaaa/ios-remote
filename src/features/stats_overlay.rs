@@ -29,7 +29,7 @@ pub fn draw_stats_overlay(rgba: &mut [u8], width: u32, _height: u32, stats: &Sta
         for x in 0..width {
             let idx = ((y * width + x) * 4) as usize;
             if idx + 3 < rgba.len() {
-                rgba[idx] = (rgba[idx] as u16 * 40 / 100) as u8;     // R dimmed
+                rgba[idx] = (rgba[idx] as u16 * 40 / 100) as u8; // R dimmed
                 rgba[idx + 1] = (rgba[idx + 1] as u16 * 40 / 100) as u8; // G dimmed
                 rgba[idx + 2] = (rgba[idx + 2] as u16 * 40 / 100) as u8; // B dimmed
             }
@@ -58,7 +58,7 @@ fn draw_char(rgba: &mut [u8], width: u32, x: u32, y: u32, ch: char) {
                 let py = y + row;
                 let idx = ((py * width + px) * 4) as usize;
                 if idx + 2 < rgba.len() {
-                    rgba[idx] = 0x00;     // R
+                    rgba[idx] = 0x00; // R
                     rgba[idx + 1] = 0xD4; // G (cyan)
                     rgba[idx + 2] = 0xFF; // B
                 }
@@ -96,6 +96,6 @@ fn char_bitmap(ch: char) -> [u8; 7] {
         '|' => [0x04, 0x04, 0x04, 0x00, 0x04, 0x04, 0x04],
         ' ' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
         '.' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04],
-        _   => [0x1F, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1F], // box for unknown
+        _ => [0x1F, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1F], // box for unknown
     }
 }

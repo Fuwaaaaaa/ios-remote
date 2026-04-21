@@ -25,8 +25,12 @@ impl I18n {
             .unwrap_or(key)
     }
 
-    pub fn set_language(&mut self, lang: &str) { self.current_lang = lang.to_string(); }
-    pub fn current_language(&self) -> &str { &self.current_lang }
+    pub fn set_language(&mut self, lang: &str) {
+        self.current_lang = lang.to_string();
+    }
+    pub fn current_language(&self) -> &str {
+        &self.current_lang
+    }
 
     pub fn available_languages(&self) -> Vec<&str> {
         self.strings.keys().map(|s| s.as_str()).collect()
@@ -52,7 +56,10 @@ impl I18n {
 
         // 日本語
         let mut ja = HashMap::new();
-        ja.insert("status.waiting".into(), "iPhoneの接続を待っています...".into());
+        ja.insert(
+            "status.waiting".into(),
+            "iPhoneの接続を待っています...".into(),
+        );
         ja.insert("status.connected".into(), "接続済み".into());
         ja.insert("status.disconnected".into(), "切断".into());
         ja.insert("action.screenshot".into(), "スクリーンショット".into());

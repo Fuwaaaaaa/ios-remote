@@ -23,19 +23,62 @@ pub struct StreamDeckIntegration {
 
 impl StreamDeckIntegration {
     pub fn new() -> Self {
-        Self { buttons: Self::default_layout(), connected: false }
+        Self {
+            buttons: Self::default_layout(),
+            connected: false,
+        }
     }
 
     fn default_layout() -> Vec<StreamDeckButton> {
         vec![
-            StreamDeckButton { position: 0, action: "screenshot".into(), label: "Screenshot".into(), icon: None },
-            StreamDeckButton { position: 1, action: "record_start".into(), label: "Record".into(), icon: None },
-            StreamDeckButton { position: 2, action: "record_stop".into(), label: "Stop".into(), icon: None },
-            StreamDeckButton { position: 3, action: "ocr".into(), label: "OCR".into(), icon: None },
-            StreamDeckButton { position: 4, action: "gif_save".into(), label: "GIF".into(), icon: None },
-            StreamDeckButton { position: 5, action: "pip_toggle".into(), label: "PiP".into(), icon: None },
-            StreamDeckButton { position: 6, action: "game_mode".into(), label: "Game".into(), icon: None },
-            StreamDeckButton { position: 7, action: "ai_describe".into(), label: "AI".into(), icon: None },
+            StreamDeckButton {
+                position: 0,
+                action: "screenshot".into(),
+                label: "Screenshot".into(),
+                icon: None,
+            },
+            StreamDeckButton {
+                position: 1,
+                action: "record_start".into(),
+                label: "Record".into(),
+                icon: None,
+            },
+            StreamDeckButton {
+                position: 2,
+                action: "record_stop".into(),
+                label: "Stop".into(),
+                icon: None,
+            },
+            StreamDeckButton {
+                position: 3,
+                action: "ocr".into(),
+                label: "OCR".into(),
+                icon: None,
+            },
+            StreamDeckButton {
+                position: 4,
+                action: "gif_save".into(),
+                label: "GIF".into(),
+                icon: None,
+            },
+            StreamDeckButton {
+                position: 5,
+                action: "pip_toggle".into(),
+                label: "PiP".into(),
+                icon: None,
+            },
+            StreamDeckButton {
+                position: 6,
+                action: "game_mode".into(),
+                label: "Game".into(),
+                icon: None,
+            },
+            StreamDeckButton {
+                position: 7,
+                action: "ai_describe".into(),
+                label: "AI".into(),
+                icon: None,
+            },
         ]
     }
 
@@ -49,7 +92,8 @@ impl StreamDeckIntegration {
 
     /// Handle a button press by position.
     pub fn on_press(&self, position: u8) -> Option<&str> {
-        self.buttons.iter()
+        self.buttons
+            .iter()
             .find(|b| b.position == position)
             .map(|b| b.action.as_str())
     }
@@ -77,7 +121,7 @@ pub fn try_open_device() -> Result<(), String> {
 
 #[cfg(feature = "stream_deck")]
 pub fn try_open_device() -> Result<elgato_streamdeck::StreamDeck, String> {
-    use elgato_streamdeck::{list_devices, new_hidapi, StreamDeck};
+    use elgato_streamdeck::{StreamDeck, list_devices, new_hidapi};
     let hid = new_hidapi().map_err(|e| format!("hidapi init: {e}"))?;
     let devices = list_devices(&hid);
     let (kind, serial) = devices

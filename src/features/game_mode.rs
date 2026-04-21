@@ -33,10 +33,18 @@ impl GameMode {
     }
 
     /// Returns true if the given feature should be suppressed.
-    pub fn suppress_stats(&self) -> bool { self.enabled }
-    pub fn suppress_touch_overlay(&self) -> bool { self.enabled }
-    pub fn suppress_notifications(&self) -> bool { self.enabled }
-    pub fn suppress_recording(&self) -> bool { self.enabled }
+    pub fn suppress_stats(&self) -> bool {
+        self.enabled
+    }
+    pub fn suppress_touch_overlay(&self) -> bool {
+        self.enabled
+    }
+    pub fn suppress_notifications(&self) -> bool {
+        self.enabled
+    }
+    pub fn suppress_recording(&self) -> bool {
+        self.enabled
+    }
 
     /// Target frame buffer size (1 = minimum latency).
     pub fn frame_buffer_size(&self) -> usize {

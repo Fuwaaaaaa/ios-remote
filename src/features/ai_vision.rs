@@ -59,12 +59,9 @@ pub fn describe_screen(frame: &Frame, prompt: Option<&str>) -> Result<String, St
         .map_err(|_| "ANTHROPIC_API_KEY not set. Set it to use AI screen understanding.")?;
 
     // Encode frame as PNG → base64
-    let _img: ImageBuffer<Rgba<u8>, _> = ImageBuffer::from_raw(
-        frame.width,
-        frame.height,
-        frame.rgba.clone(),
-    )
-    .ok_or("Failed to create image buffer")?;
+    let _img: ImageBuffer<Rgba<u8>, _> =
+        ImageBuffer::from_raw(frame.width, frame.height, frame.rgba.clone())
+            .ok_or("Failed to create image buffer")?;
 
     let mut png_bytes = Vec::new();
     let encoder = image::codecs::png::PngEncoder::new(&mut png_bytes);
@@ -126,12 +123,17 @@ fn ureq_post(api_key: &str, body: &[u8]) -> Result<String, String> {
     let output = std::process::Command::new("curl")
         .args([
             "-s",
-            "-X", "POST",
+            "-X",
+            "POST",
             "https://api.anthropic.com/v1/messages",
-            "-H", &format!("x-api-key: {}", api_key),
-            "-H", "anthropic-version: 2023-06-01",
-            "-H", "content-type: application/json",
-            "-d", &String::from_utf8_lossy(body),
+            "-H",
+            &format!("x-api-key: {}", api_key),
+            "-H",
+            "anthropic-version: 2023-06-01",
+            "-H",
+            "content-type: application/json",
+            "-d",
+            &String::from_utf8_lossy(body),
         ])
         .output()
         .map_err(|e| format!("curl failed: {}", e))?;
@@ -145,7 +147,6 @@ fn ureq_post(api_key: &str, body: &[u8]) -> Result<String, String> {
 }
 
 fn base64_encode(data: &[u8]) -> String {
-    
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::with_capacity(data.len() * 4 / 3 + 4);
 

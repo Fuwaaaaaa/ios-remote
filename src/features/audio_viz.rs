@@ -33,7 +33,9 @@ impl AudioVisualizer {
     /// Simple DFT for spectrum (64 bands).
     fn compute_spectrum(&mut self) {
         let n = self.waveform.len();
-        if n < 128 { return; }
+        if n < 128 {
+            return;
+        }
         let samples: Vec<f32> = self.waveform.iter().rev().take(512).copied().collect();
         for k in 0..64 {
             let freq = k as f32 / 64.0 * std::f32::consts::PI;
@@ -51,14 +53,22 @@ impl AudioVisualizer {
     /// Draw waveform onto an RGBA buffer at given position.
     pub fn draw_waveform(&self, rgba: &mut [u8], buf_w: u32, x: u32, y: u32, w: u32, h: u32) {
         let mid_y = y + h / 2;
-        let samples: Vec<f32> = self.waveform.iter().rev().take(w as usize).copied().collect();
+        let samples: Vec<f32> = self
+            .waveform
+            .iter()
+            .rev()
+            .take(w as usize)
+            .copied()
+            .collect();
         for (i, &s) in samples.iter().enumerate() {
             let px = x + i as u32;
             let py = (mid_y as f32 + s * (h as f32 / 2.0)).clamp(y as f32, (y + h) as f32) as u32;
             if px < buf_w {
                 let idx = ((py * buf_w + px) * 4) as usize;
                 if idx + 2 < rgba.len() {
-                    rgba[idx] = 0; rgba[idx + 1] = 255; rgba[idx + 2] = 128;
+                    rgba[idx] = 0;
+                    rgba[idx + 1] = 255;
+                    rgba[idx + 2] = 128;
                 }
             }
         }
@@ -78,7 +88,9 @@ impl AudioVisualizer {
                         let idx = ((py * buf_w + px) * 4) as usize;
                         if idx + 2 < rgba.len() {
                             let g = (255.0 * (1.0 - dy as f32 / h as f32)) as u8;
-                            rgba[idx] = 0; rgba[idx + 1] = g; rgba[idx + 2] = 255;
+                            rgba[idx] = 0;
+                            rgba[idx + 1] = g;
+                            rgba[idx + 2] = 255;
                         }
                     }
                 }
@@ -96,14 +108,25 @@ pub struct AudioRecorder {
 
 impl AudioRecorder {
     pub fn new(sample_rate: u32) -> Self {
-        Self { samples: Vec::new(), sample_rate, recording: false }
+        Self {
+            samples: Vec::new(),
+            sample_rate,
+            recording: false,
+        }
     }
 
-    pub fn start(&mut self) { self.samples.clear(); self.recording = true; }
-    pub fn stop(&mut self) { self.recording = false; }
+    pub fn start(&mut self) {
+        self.samples.clear();
+        self.recording = true;
+    }
+    pub fn stop(&mut self) {
+        self.recording = false;
+    }
 
     pub fn push(&mut self, pcm_i16: &[i16]) {
-        if self.recording { self.samples.extend_from_slice(pcm_i16); }
+        if self.recording {
+            self.samples.extend_from_slice(pcm_i16);
+        }
     }
 
     /// Save as WAV file (PCM 16-bit mono).
@@ -124,7 +147,9 @@ impl AudioRecorder {
         buf.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
         buf.extend_from_slice(b"data");
         buf.extend_from_slice(&data_size.to_le_bytes());
-        for &s in &self.samples { buf.extend_from_slice(&s.to_le_bytes()); }
+        for &s in &self.samples {
+            buf.extend_from_slice(&s.to_le_bytes());
+        }
         std::fs::write(path, buf).map_err(|e| e.to_string())
     }
 }

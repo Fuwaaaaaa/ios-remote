@@ -13,7 +13,9 @@ impl Heatmap {
         let gh = (screen_h / cell_size + 1) as usize;
         Self {
             grid: vec![vec![0u32; gw]; gh],
-            grid_w: gw, grid_h: gh, cell_size,
+            grid_w: gw,
+            grid_h: gh,
+            cell_size,
         }
     }
 
@@ -26,11 +28,21 @@ impl Heatmap {
     }
 
     pub fn clear(&mut self) {
-        for row in &mut self.grid { for cell in row.iter_mut() { *cell = 0; } }
+        for row in &mut self.grid {
+            for cell in row.iter_mut() {
+                *cell = 0;
+            }
+        }
     }
 
     fn max_value(&self) -> u32 {
-        self.grid.iter().flat_map(|r| r.iter()).copied().max().unwrap_or(1).max(1)
+        self.grid
+            .iter()
+            .flat_map(|r| r.iter())
+            .copied()
+            .max()
+            .unwrap_or(1)
+            .max(1)
     }
 
     /// Render heatmap overlay onto RGBA buffer.
@@ -39,7 +51,9 @@ impl Heatmap {
         for gy in 0..self.grid_h {
             for gx in 0..self.grid_w {
                 let val = self.grid[gy][gx];
-                if val == 0 { continue; }
+                if val == 0 {
+                    continue;
+                }
                 let intensity = val as f32 / max_val;
                 let (cr, cg, cb) = heat_color(intensity);
                 let px_start = gx as u32 * self.cell_size;
@@ -48,7 +62,9 @@ impl Heatmap {
                     for dx in 0..self.cell_size {
                         let px = px_start + dx;
                         let py = py_start + dy;
-                        if px >= buf_w || py >= buf_h { continue; }
+                        if px >= buf_w || py >= buf_h {
+                            continue;
+                        }
                         let idx = ((py * buf_w + px) * 4) as usize;
                         if idx + 2 < rgba.len() {
                             let a = alpha * intensity;

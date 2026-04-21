@@ -19,11 +19,19 @@ pub struct Subtitle {
 
 impl Transcriber {
     pub fn new() -> Self {
-        Self { enabled: false, subtitles: Vec::new(), max_subtitles: 50 }
+        Self {
+            enabled: false,
+            subtitles: Vec::new(),
+            max_subtitles: 50,
+        }
     }
 
     /// Transcribe a chunk of audio (WAV bytes) using Whisper.
-    pub fn transcribe_chunk(&mut self, wav_data: &[u8], timestamp_ms: u64) -> Result<String, String> {
+    pub fn transcribe_chunk(
+        &mut self,
+        wav_data: &[u8],
+        timestamp_ms: u64,
+    ) -> Result<String, String> {
         // Try local whisper.cpp first; fall through to the API on any error.
         if let Ok(text) = self.try_local_whisper(wav_data) {
             self.add_subtitle(&text, timestamp_ms);
@@ -40,12 +48,18 @@ impl Transcriber {
 
         let output = std::process::Command::new("curl")
             .args([
-                "-s", "-X", "POST",
+                "-s",
+                "-X",
+                "POST",
                 "https://api.openai.com/v1/audio/transcriptions",
-                "-H", &format!("Authorization: Bearer {}", api_key),
-                "-F", &format!("file=@{}", temp.display()),
-                "-F", "model=whisper-1",
-                "-F", "response_format=text",
+                "-H",
+                &format!("Authorization: Bearer {}", api_key),
+                "-F",
+                &format!("file=@{}", temp.display()),
+                "-F",
+                "model=whisper-1",
+                "-F",
+                "response_format=text",
             ])
             .output()
             .map_err(|e| format!("curl failed: {}", e))?;
@@ -81,12 +95,16 @@ impl Transcriber {
         let samples = wav_to_f32(wav_data).map_err(|e| format!("wav decode: {e}"))?;
         let ctx = WhisperContext::new_with_params(&model_path, WhisperContextParameters::default())
             .map_err(|e| format!("whisper init: {e}"))?;
-        let mut state = ctx.create_state().map_err(|e| format!("whisper state: {e}"))?;
+        let mut state = ctx
+            .create_state()
+            .map_err(|e| format!("whisper state: {e}"))?;
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         params.set_translate(false);
         params.set_print_progress(false);
         params.set_print_special(false);
-        state.full(params, &samples).map_err(|e| format!("whisper run: {e}"))?;
+        state
+            .full(params, &samples)
+            .map_err(|e| format!("whisper run: {e}"))?;
 
         let n = state.full_n_segments().map_err(|e| e.to_string())?;
         let mut out = String::new();
@@ -118,16 +136,19 @@ impl Transcriber {
 
     /// Get active subtitles for the given timestamp.
     pub fn active_subtitles(&self, current_ms: u64) -> Vec<&Subtitle> {
-        self.subtitles.iter().filter(|s| {
-            current_ms >= s.start_ms && current_ms < s.start_ms + s.duration_ms
-        }).collect()
+        self.subtitles
+            .iter()
+            .filter(|s| current_ms >= s.start_ms && current_ms < s.start_ms + s.duration_ms)
+            .collect()
     }
 
     /// Draw subtitle overlay at bottom of frame.
     #[allow(dead_code)]
     pub fn draw_subtitles(&self, rgba: &mut [u8], w: u32, h: u32, current_ms: u64) {
         let active = self.active_subtitles(current_ms);
-        if active.is_empty() { return; }
+        if active.is_empty() {
+            return;
+        }
 
         // Dark background bar at bottom
         let bar_h = 40u32;
