@@ -56,7 +56,7 @@ impl AppTracker {
     /// Get usage stats sorted by time (descending).
     pub fn usage_stats(&self) -> Vec<(String, u64)> {
         let mut stats: Vec<_> = self.usage.iter().map(|(k, v)| (k.clone(), *v)).collect();
-        stats.sort_by(|a, b| b.1.cmp(&a.1));
+        stats.sort_by_key(|s| std::cmp::Reverse(s.1));
         stats
     }
 

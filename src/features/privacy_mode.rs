@@ -68,12 +68,13 @@ fn box_blur_region(rgba: &mut [u8], w: u32, h: u32, x: u32, y: u32, rw: u32, rh:
                     }
                 }
 
-                if count > 0 {
+                if let Some(c) = std::num::NonZeroU32::new(count) {
                     let idx = ((py * w + px) * 4) as usize;
                     if idx + 2 < rgba.len() {
-                        rgba[idx] = (sum_r / count) as u8;
-                        rgba[idx + 1] = (sum_g / count) as u8;
-                        rgba[idx + 2] = (sum_b / count) as u8;
+                        let c = c.get();
+                        rgba[idx] = (sum_r / c) as u8;
+                        rgba[idx + 1] = (sum_g / c) as u8;
+                        rgba[idx + 2] = (sum_b / c) as u8;
                     }
                 }
             }
@@ -122,8 +123,9 @@ fn pixelate_region(rgba: &mut [u8], w: u32, h: u32, x: u32, y: u32, rw: u32, rh:
                 }
             }
 
-            if count > 0 {
-                let avg = [(sum_r / count) as u8, (sum_g / count) as u8, (sum_b / count) as u8];
+            if let Some(c) = std::num::NonZeroU32::new(count) {
+                let c = c.get();
+                let avg = [(sum_r / c) as u8, (sum_g / c) as u8, (sum_b / c) as u8];
                 for dy in 0..block {
                     for dx in 0..block {
                         let px = bx + dx;

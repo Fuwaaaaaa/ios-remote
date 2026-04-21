@@ -249,7 +249,7 @@ impl ConnectionHistory {
     /// Get recently connected devices, most recent first.
     pub fn recent(&self, limit: usize) -> Vec<&ConnectionRecord> {
         let mut sorted: Vec<_> = self.records.iter().collect();
-        sorted.sort_by(|a, b| b.last_connected.cmp(&a.last_connected));
+        sorted.sort_by_key(|r| std::cmp::Reverse(r.last_connected));
         sorted.truncate(limit);
         sorted
     }
