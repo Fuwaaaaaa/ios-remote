@@ -1,11 +1,9 @@
 pub mod ai_vision;
 pub mod annotation;
-pub mod app_detector;
 pub mod audio_transcription;
 pub mod audio_viz;
 pub mod auto_connect;
 pub mod battery_saver;
-pub mod benchmark;
 pub mod clipboard_history;
 pub mod clipboard_sync;
 pub mod color_picker;
@@ -13,7 +11,6 @@ pub mod custom_cursor;
 pub mod design_overlay;
 pub mod device_frame;
 pub mod display;
-pub mod drag_drop;
 pub mod frame_analysis;
 pub mod game_mode;
 pub mod gestures;
@@ -23,14 +20,10 @@ pub mod i18n;
 pub mod imgur_share;
 pub mod keyboard_input;
 pub mod macros;
-pub mod mouse_gesture;
-pub mod multi_device;
 pub mod notification_capture;
 pub mod notification_rules;
 pub mod ocr;
 pub mod ocr_history;
-pub mod pdf_export;
-pub mod presentation;
 pub mod privacy_mode;
 pub mod qr_generator;
 pub mod qr_scanner;
@@ -55,14 +48,27 @@ pub mod themes;
 pub mod timelapse;
 pub mod touch_overlay;
 pub mod translation;
-pub mod tts;
-pub mod video_filter;
 pub mod voice_command;
 pub mod vr_overlay;
 pub mod watermark;
 pub mod wda_client;
 pub mod webhook;
 pub mod zoom;
+
+// Quarantined scaffolds — see Cargo.toml `experimental` feature.
+// `benchmark` + `video_filter` travel together: benchmark drives video_filter.
+#[cfg(feature = "experimental")]
+pub mod app_detector;
+#[cfg(feature = "experimental")]
+pub mod benchmark;
+#[cfg(feature = "experimental")]
+pub mod mouse_gesture;
+#[cfg(feature = "experimental")]
+pub mod pdf_export;
+#[cfg(feature = "experimental")]
+pub mod presentation;
+#[cfg(feature = "experimental")]
+pub mod video_filter;
 
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;

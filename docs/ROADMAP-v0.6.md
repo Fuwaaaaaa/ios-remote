@@ -75,23 +75,25 @@ running, live system speech produces subtitle lines in the display window.
 
 ## Backlog discovered during v0.5.0 smoke/review
 
-### 68-feature stocktake
-Eight files under `src/features/` are declared in `features/mod.rs` but
-never reached from any startup path — **541 lines dead-but-compiled**:
-`app_detector`, `mouse_gesture`, `multi_device`, `drag_drop`,
-`presentation`, `pdf_export`, `tts`, `video_filter` (`vr_overlay` is
-tracked separately above).
+### 68-feature stocktake — DONE
 
-Apply the policy below as a single PR, not one file at a time:
+Closed in v0.6 prep. Nine dead-but-compiled files (657 LOC) resolved:
 
-- **Promote** (wire up now) — files whose capability is advertised in
-  README/CHANGELOG or shipped in a UI panel
-- **Quarantine** behind `#[cfg(feature = "experimental")]` (off by default
-  in v0.6) — "nice-to-have" scaffolds that are worth keeping on ice
-- **Delete** — everything else; the git history is enough record
+- **Deleted** (147 LOC): `multi_device` (contradicted README "1 台ずつ"
+  single-device posture), `drag_drop` (TODO stubs only), `tts`
+  (PowerShell SAPI one-liner, no UI)
+- **Quarantined** behind `experimental` feature (510 LOC): `app_detector`,
+  `benchmark`, `mouse_gesture`, `pdf_export`, `presentation`,
+  `video_filter`. `benchmark` + `video_filter` travel as a pair since the
+  former drives the latter.
+- **README cleanup**: removed "アプリ使用時間" and "ベンチマーク" bullets
+  that advertised quarantined-now features.
+- **CI**: added `cargo build --features experimental` so quarantined code
+  does not bitrot silently.
 
-Goal: shrink the dead-but-compiled surface by at least 50% to keep clippy
-surface + compile time small and avoid misleading README claims.
+Default build is 657 LOC lighter; the design work survives under an
+explicit flag. `vr_overlay` remains tracked separately in "VR overlay"
+above (covered by its own roadmap item).
 
 ### Cross-process activity indicator
 When recording or session replay is running, expose a hotkey / tray indicator.

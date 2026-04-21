@@ -15,6 +15,11 @@ stream_deck = ["elgato-streamdeck"]
 # Local Whisper transcription via whisper.cpp bindings. Requires a GGML model
 # file at runtime (see README).
 whisper = ["whisper-rs"]
+# Unwired scaffolding that compiled into v0.5 but never reached a startup
+# path. Kept under this flag during v0.6 stocktake so the designs survive
+# compiler scrutiny without bloating default builds. See docs/ROADMAP-v0.6.md
+# §68-feature stocktake. Candidates for promotion or deletion as usage emerges.
+experimental = []
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }

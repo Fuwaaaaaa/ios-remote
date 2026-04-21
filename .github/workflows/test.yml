@@ -40,6 +40,9 @@ jobs:
       - name: Build with stream_deck feature
         run: cargo build --locked --features stream_deck
 
+      - name: Build with experimental feature (quarantined scaffolds)
+        run: cargo build --locked --features experimental
+
       # `whisper` feature pulls whisper-rs-sys which needs libclang. A dedicated
       # build job with llvm setup can be added when we start shipping binaries
       # with that feature enabled.
