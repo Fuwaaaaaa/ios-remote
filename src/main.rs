@@ -47,6 +47,14 @@ struct Cli {
     /// the token from config is used; if config has none, one is generated.
     #[arg(long)]
     token: Option<String>,
+
+    /// Select a specific iPhone by UDID (see --list-devices).
+    #[arg(long)]
+    device: Option<String>,
+
+    /// Print the connected iPhone list and exit.
+    #[arg(long)]
+    list_devices: bool,
 }
 
 #[tokio::main]
@@ -65,6 +73,11 @@ async fn main() -> anyhow::Result<()> {
         "ios-remote v{} — USB Type-C mode",
         env!("CARGO_PKG_VERSION")
     );
+
+    // ── Device listing short-circuit ────────────────────────────────────────
+    if cli.list_devices {
+        return usb::print_device_list().await;
+    }
 
     // ── Config + token ──────────────────────────────────────────────────────
     let mut app_config = config::AppConfig::load();
@@ -162,7 +175,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // ── USB connection (main task) ──────────────────────────────────────────
-    let receiver = usb::UsbReceiver::new(frame_bus);
+    let receiver = usb::UsbReceiver::new(frame_bus).with_udid(cli.device.clone());
     receiver.run().await?;
 
     let _ = display_handle.join();
