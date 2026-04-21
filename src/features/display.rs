@@ -53,14 +53,13 @@ pub fn run_display(mut frame_rx: broadcast::Receiver<Arc<Frame>>, pip_mode: bool
         }
 
         // Hotkeys
-        if window.is_key_released(Key::S) {
-            if let Some(ref frame) = latest_frame {
+        if window.is_key_released(Key::S)
+            && let Some(ref frame) = latest_frame {
                 match screenshot::save_frame(frame) {
                     Ok(path) => info!(file = %path, "Screenshot saved (hotkey)"),
                     Err(e) => tracing::warn!(error = %e, "Screenshot failed"),
                 }
             }
-        }
 
         window
             .update_with_buffer(&buffer, width, height)
@@ -75,18 +74,14 @@ pub fn run_display(mut frame_rx: broadcast::Receiver<Arc<Frame>>, pip_mode: bool
 /// Convert RGBA [u8] to RGB32 [u32] for minifb (0x00RRGGBB).
 fn rgba_to_rgb32(rgba: &[u8], width: usize, height: usize) -> Vec<u32> {
     let pixel_count = width * height;
-    let mut buf = vec![0u32; pixel_count];
-
-    for i in 0..pixel_count {
-        let idx = i * 4;
-        if idx + 2 < rgba.len() {
-            let r = rgba[idx] as u32;
-            let g = rgba[idx + 1] as u32;
-            let b = rgba[idx + 2] as u32;
-            buf[i] = (r << 16) | (g << 8) | b;
-        }
+    let mut buf = Vec::with_capacity(pixel_count);
+    for chunk in rgba.chunks_exact(4).take(pixel_count) {
+        let r = chunk[0] as u32;
+        let g = chunk[1] as u32;
+        let b = chunk[2] as u32;
+        buf.push((r << 16) | (g << 8) | b);
     }
-
+    buf.resize(pixel_count, 0);
     buf
 }
 

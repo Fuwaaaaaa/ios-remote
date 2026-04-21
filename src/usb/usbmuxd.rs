@@ -15,7 +15,6 @@ use tracing::{debug, info};
 ///   - u32 tag (request identifier)
 ///
 /// Message body is a binary plist (version 1) or XML plist.
-
 const USBMUXD_PORT: u16 = 27015; // Windows (Apple Mobile Device Service)
 
 // Message types

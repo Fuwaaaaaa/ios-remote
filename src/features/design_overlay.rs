@@ -1,4 +1,4 @@
-/// Design overlays: safe area, grid, and accessibility tools for UI development.
+//! Design overlays: safe area, grid, and accessibility tools for UI development.
 
 /// iOS safe area inset overlay.
 pub struct SafeAreaOverlay {

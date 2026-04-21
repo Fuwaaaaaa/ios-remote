@@ -1,11 +1,11 @@
-/// Touch overlay: draw a visual indicator at the mouse position on the mirrored screen.
-///
-/// When the user clicks/drags on the display window, this module draws:
-///   - A ripple animation at click position (simulates iOS tap feedback)
-///   - A trail line during drag (simulates swipe path)
-///   - A pulsing ring during long-press
-///
-/// The overlay is composited on top of the mirrored frame before display.
+//! Touch overlay: draw a visual indicator at the mouse position on the mirrored screen.
+//!
+//! When the user clicks/drags on the display window, this module draws:
+//!   - A ripple animation at click position (simulates iOS tap feedback)
+//!   - A trail line during drag (simulates swipe path)
+//!   - A pulsing ring during long-press
+//!
+//! The overlay is composited on top of the mirrored frame before display.
 
 /// Overlay element to draw on the frame.
 #[derive(Clone, Debug)]

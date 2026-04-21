@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 /// Internationalization: multi-language UI string support.
-
 pub struct I18n {
     current_lang: String,
     strings: HashMap<String, HashMap<String, String>>,

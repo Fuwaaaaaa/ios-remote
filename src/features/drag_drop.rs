@@ -4,7 +4,6 @@ use tracing::info;
 ///
 /// Listens for file drop events on the display window and triggers
 /// AFC file transfer to the iPhone.
-
 /// Handle a file drop event from the display window.
 pub fn handle_file_drop(paths: &[String]) {
     for path in paths {

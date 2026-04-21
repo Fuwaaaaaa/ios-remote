@@ -49,7 +49,7 @@ pub async fn motion_recording(
                     skipped_frames += 1;
                 }
 
-                if (recording_frames + skipped_frames) % 300 == 0 {
+                if (recording_frames + skipped_frames).is_multiple_of(300) {
                     info!(
                         recorded = recording_frames,
                         skipped = skipped_frames,

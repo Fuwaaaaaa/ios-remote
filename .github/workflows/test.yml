@@ -28,13 +28,19 @@ jobs:
       - name: Run tests
         run: cargo test --locked
 
-      - name: Clippy (treat warnings as errors)
-        run: cargo clippy --locked -- -D warnings
-        continue-on-error: true  # existing code has some warnings; tighten over time
+      - name: Clippy — deny warnings on all targets
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Rustfmt check
         run: cargo fmt --check
-        continue-on-error: true  # ditto
+        continue-on-error: true  # rustfmt pass is opt-in for now
 
-      - name: Build optional features compile cleanly
+      - name: Build with lua feature
         run: cargo build --locked --features lua
+
+      - name: Build with stream_deck feature
+        run: cargo build --locked --features stream_deck
+
+      # `whisper` feature pulls whisper-rs-sys which needs libclang. A dedicated
+      # build job with llvm setup can be added when we start shipping binaries
+      # with that feature enabled.

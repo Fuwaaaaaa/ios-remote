@@ -5,7 +5,6 @@ use tracing::info;
 /// Shows a tray icon in the Windows taskbar notification area.
 /// Right-click menu: Status, Screenshot, Toggle Recording, Settings, Quit.
 /// Left-click: Show/hide main window.
-
 pub struct TrayIcon {
     visible: bool,
 }

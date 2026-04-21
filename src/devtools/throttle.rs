@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 /// Bandwidth throttle for controlling network usage.
 ///
 /// Can be applied to the video stream receiver to limit bandwidth consumption.
-
 pub struct Throttle {
     limit_bytes_per_sec: u64,
     window_bytes: u64,

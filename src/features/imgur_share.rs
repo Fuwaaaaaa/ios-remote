@@ -3,7 +3,6 @@ use tracing::info;
 /// Imgur instant share: upload screenshot and copy URL to clipboard.
 ///
 /// One-key workflow: capture frame → PNG → upload to Imgur → URL in clipboard.
-
 pub fn upload_to_imgur(png_path: &str) -> Result<String, String> {
     let client_id = std::env::var("IMGUR_CLIENT_ID")
         .unwrap_or_else(|_| "anonymous".to_string());

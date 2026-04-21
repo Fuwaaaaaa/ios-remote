@@ -1,4 +1,4 @@
-/// Unit tests for ios-remote.
+//! Unit tests for ios-remote.
 
 #[cfg(test)]
 mod tests {
@@ -31,7 +31,7 @@ mod tests {
 
     #[test]
     fn test_rgb_to_hsl_white() {
-        let (h, s, l) = rgb_to_hsl(255, 255, 255);
+        let (_h, s, l) = rgb_to_hsl(255, 255, 255);
         assert!(s < 0.01, "White should have zero saturation");
         assert!((l - 1.0).abs() < 0.01, "White should have 100% lightness");
     }
@@ -138,7 +138,8 @@ mod tests {
         for i in 0..va.len().max(vb.len()) {
             let a = va.get(i).copied().unwrap_or(0);
             let b = vb.get(i).copied().unwrap_or(0);
-            if a > b { return true; } if a < b { return false; }
+            if a > b { return true; }
+            if a < b { return false; }
         }
         false
     }

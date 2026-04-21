@@ -4,7 +4,6 @@ use tracing::info;
 ///
 /// Sends audio to Whisper API (OpenAI) or local whisper.cpp for transcription.
 /// Displays subtitles as an overlay on the mirrored screen.
-
 pub struct Transcriber {
     pub enabled: bool,
     pub subtitles: Vec<Subtitle>,
@@ -25,13 +24,10 @@ impl Transcriber {
 
     /// Transcribe a chunk of audio (WAV bytes) using Whisper.
     pub fn transcribe_chunk(&mut self, wav_data: &[u8], timestamp_ms: u64) -> Result<String, String> {
-        // Try local whisper.cpp first
-        match self.try_local_whisper(wav_data) {
-            Ok(text) => {
-                self.add_subtitle(&text, timestamp_ms);
-                return Ok(text);
-            }
-            Err(_) => {} // fall through to API
+        // Try local whisper.cpp first; fall through to the API on any error.
+        if let Ok(text) = self.try_local_whisper(wav_data) {
+            self.add_subtitle(&text, timestamp_ms);
+            return Ok(text);
         }
 
         // Try OpenAI Whisper API
@@ -140,9 +136,9 @@ impl Transcriber {
             for x in 0..w {
                 let idx = ((y * w + x) * 4) as usize;
                 if idx + 2 < rgba.len() {
-                    rgba[idx] = rgba[idx] / 3;
-                    rgba[idx + 1] = rgba[idx + 1] / 3;
-                    rgba[idx + 2] = rgba[idx + 2] / 3;
+                    rgba[idx] /= 3;
+                    rgba[idx + 1] /= 3;
+                    rgba[idx + 2] /= 3;
                 }
             }
         }

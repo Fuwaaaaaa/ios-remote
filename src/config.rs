@@ -164,11 +164,10 @@ impl AppConfig {
                 return trimmed.to_string();
             }
         }
-        if let Some(existing) = &self.network.api_token {
-            if !existing.is_empty() {
+        if let Some(existing) = &self.network.api_token
+            && !existing.is_empty() {
                 return existing.clone();
             }
-        }
         let token = generate_token();
         self.network.api_token = Some(token.clone());
         self.save();

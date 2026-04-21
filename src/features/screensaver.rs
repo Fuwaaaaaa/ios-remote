@@ -1,7 +1,6 @@
 use chrono::Local;
 
 /// Screensaver: display clock/info when no device is connected.
-
 pub struct Screensaver {
     pub enabled: bool,
     pub mode: ScreensaverMode,

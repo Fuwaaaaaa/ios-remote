@@ -8,7 +8,6 @@ use tracing::{info, warn};
 ///
 /// Produces a sequence of PNGs that can be combined into a video:
 ///   ffmpeg -framerate 30 -i timelapse/frame_%06d.png -c:v libx264 timelapse.mp4
-
 pub async fn run_timelapse(
     mut rx: broadcast::Receiver<Arc<Frame>>,
     interval_secs: u64,
@@ -26,21 +25,18 @@ pub async fn run_timelapse(
         // Wait for interval
         tokio::time::sleep(std::time::Duration::from_secs(interval_secs)).await;
 
-        // Get latest frame
-        match rx.try_recv() {
-            Ok(frame) => {
-                let path = format!("{}/frame_{:06}.png", dir, frame_num);
-                if let Some(img) = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(
-                    frame.width, frame.height, frame.rgba.to_vec(),
-                ) {
-                    let _ = img.save(&path);
-                    frame_num += 1;
-                    if frame_num % 10 == 0 {
-                        info!(frames = frame_num, "Timelapse progress");
-                    }
+        // Get latest frame; skip silently if the channel is empty or lagged.
+        if let Ok(frame) = rx.try_recv() {
+            let path = format!("{}/frame_{:06}.png", dir, frame_num);
+            if let Some(img) = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(
+                frame.width, frame.height, frame.rgba.to_vec(),
+            ) {
+                let _ = img.save(&path);
+                frame_num += 1;
+                if frame_num.is_multiple_of(10) {
+                    info!(frames = frame_num, "Timelapse progress");
                 }
             }
-            _ => {} // skip if no frame
         }
 
         // Drain extra frames to stay current

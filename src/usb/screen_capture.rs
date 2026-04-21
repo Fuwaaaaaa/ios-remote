@@ -17,7 +17,6 @@ use tracing::{info, warn};
 ///   3. Send DLMessageProcessMessage with ScreenShotRequest
 ///   4. Receive PNG image data
 ///   5. Repeat from step 3
-
 const SCREENSHOTR_SERVICE: &str = "com.apple.mobile.screenshotr";
 
 pub async fn capture_loop(
@@ -133,11 +132,10 @@ async fn recv_screenshot(stream: &mut tokio::net::TcpStream) -> anyhow::Result<V
 
     if let plist::Value::Array(arr) = value {
         for item in &arr {
-            if let plist::Value::Dictionary(dict) = item {
-                if let Some(plist::Value::Data(png)) = dict.get("ScreenShotData") {
+            if let plist::Value::Dictionary(dict) = item
+                && let Some(plist::Value::Data(png)) = dict.get("ScreenShotData") {
                     return Ok(png.clone());
                 }
-            }
         }
     }
 

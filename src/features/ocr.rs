@@ -8,9 +8,10 @@ use tracing::info;
 /// visible text. Useful for copying text from iPhone without touching it.
 ///
 /// Two backends:
+///
 ///   1. Tesseract (local, requires tesseract-ocr installed)
 ///   2. Cloud API (sends image to an OCR API endpoint)
-
+///
 /// Extract text from a frame region.
 ///
 /// `region` is (x, y, width, height) in pixels. Pass None for full frame.

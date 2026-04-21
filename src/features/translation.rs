@@ -5,7 +5,6 @@ use tracing::info;
 ///
 /// Uses OCR to extract text regions, then translates via API and draws
 /// translated text over the original position.
-
 pub struct TranslationOverlay {
     pub source_lang: String,
     pub target_lang: String,

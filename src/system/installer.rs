@@ -4,7 +4,6 @@ use tracing::info;
 ///
 /// Generates NSIS script for creating a Windows installer.
 /// Run: `makensis installer.nsi` to create Setup.exe.
-
 pub fn generate_nsis_script() -> String {
     let version = env!("CARGO_PKG_VERSION");
     format!(r#"

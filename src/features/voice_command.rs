@@ -4,7 +4,6 @@ use tracing::info;
 ///
 /// Uses Windows Speech Recognition or Whisper API to listen for commands.
 /// "screenshot", "record", "stop", "zoom in", "quit"
-
 pub struct VoiceCommands {
     pub enabled: bool,
     pub commands: Vec<VoiceMapping>,

@@ -2,7 +2,6 @@ use std::time::Instant;
 use tracing::info;
 
 /// Benchmark mode: measure system performance for mirroring.
-
 pub struct BenchmarkResult {
     pub decode_fps: f64,
     pub render_fps: f64,

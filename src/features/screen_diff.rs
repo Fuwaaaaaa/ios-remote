@@ -3,7 +3,6 @@ use super::Frame;
 /// Screen diff: highlight pixel differences between two consecutive frames.
 ///
 /// Changed pixels are tinted red. Useful for detecting subtle UI changes.
-
 pub fn diff_highlight(prev: &Frame, curr: &Frame, threshold: u32) -> Vec<u8> {
     let w = curr.width;
     let h = curr.height;

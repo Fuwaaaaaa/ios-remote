@@ -5,7 +5,6 @@ use tracing::info;
 ///
 /// Checks the connection history and monitors mDNS for known device IDs.
 /// When a known device appears on the network, triggers auto-pairing.
-
 pub struct AutoConnect {
     known_devices: Vec<String>,
     enabled: bool,

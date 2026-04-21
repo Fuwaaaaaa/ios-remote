@@ -1,7 +1,6 @@
 use tracing::info;
 
 /// Sound notifications: play a WAV file when events occur.
-
 pub fn play_sound(wav_path: &str) -> Result<(), String> {
     // Use PowerShell to play WAV (no extra deps needed)
     let output = std::process::Command::new("powershell")

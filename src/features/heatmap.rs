@@ -1,4 +1,4 @@
-/// Touch heatmap: visualize where taps/clicks happen most frequently.
+//! Touch heatmap: visualize where taps/clicks happen most frequently.
 
 pub struct Heatmap {
     grid: Vec<Vec<u32>>,

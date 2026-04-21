@@ -63,8 +63,8 @@ impl ProtocolAnalyzer {
     }
 
     fn push(&mut self, msg: ProtocolMessage) {
-        if let Some(ref path) = self.log_file {
-            if let Ok(json) = serde_json::to_string(&msg) {
+        if let Some(ref path) = self.log_file
+            && let Ok(json) = serde_json::to_string(&msg) {
                 let _ = fs::OpenOptions::new()
                     .create(true).append(true).open(path)
                     .and_then(|mut f| {
@@ -72,7 +72,6 @@ impl ProtocolAnalyzer {
                         writeln!(f, "{}", json)
                     });
             }
-        }
         self.messages.push(msg);
         if self.messages.len() > self.max_messages {
             self.messages.remove(0);
@@ -92,8 +91,7 @@ impl ProtocolAnalyzer {
 
 fn preview_body(body: &[u8]) -> String {
     if body.is_empty() { return String::new(); }
-    if body.len() <= 64 {
-        if let Ok(s) = std::str::from_utf8(body) { return s.to_string(); }
-    }
+    if body.len() <= 64
+        && let Ok(s) = std::str::from_utf8(body) { return s.to_string(); }
     format!("[{} bytes: {:02X?}...]", body.len(), &body[..body.len().min(32)])
 }

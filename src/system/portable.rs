@@ -6,7 +6,6 @@ use tracing::info;
 /// When `portable.marker` file exists next to the exe, all paths
 /// (config, recordings, screenshots, etc.) are relative to exe dir
 /// instead of the current working directory.
-
 pub fn is_portable() -> bool {
     exe_dir().join("portable.marker").exists()
 }

@@ -1,7 +1,7 @@
-/// Connection QR code generator: create a QR code with PC's IP and port.
-///
-/// Display the QR code in the terminal or save as PNG. iPhone can scan it
-/// to open the Web Dashboard in Safari.
+//! Connection QR code generator: create a QR code with PC's IP and port.
+//!
+//! Display the QR code in the terminal or save as PNG. iPhone can scan it
+//! to open the Web Dashboard in Safari.
 
 pub fn generate_connection_qr(ip: &str, port: u16) -> String {
     let url = format!("http://{}:{}", ip, port);

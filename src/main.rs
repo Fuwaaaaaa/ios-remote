@@ -1,4 +1,13 @@
 #![allow(dead_code)]
+// Pixel-drawing helpers (rgba: &mut [u8], w, h, x, y, color, ...) naturally
+// exceed clippy's default 7-argument threshold. Grouping them into a struct
+// would obscure hot-path call sites without meaningful benefit.
+#![allow(clippy::too_many_arguments)]
+// PR2 removed all panicking unwraps; keep new ones out of the tree. Tests
+// are exempt because assertions with unwrap are idiomatic for propagating
+// test failure information.
+#![deny(clippy::unwrap_used, clippy::expect_used)]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 mod config;
 mod devtools;

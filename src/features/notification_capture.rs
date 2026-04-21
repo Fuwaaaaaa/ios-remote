@@ -22,8 +22,8 @@ pub async fn run(bus: FrameBus) {
                     continue;
                 }
 
-                if let Some(ref prev) = prev_frame {
-                    if super::frame_analysis::detect_notification_banner(prev, &frame) {
+                if let Some(ref prev) = prev_frame
+                    && super::frame_analysis::detect_notification_banner(prev, &frame) {
                         info!("Notification detected — auto-capturing");
 
                         let dir = "notifications";
@@ -42,7 +42,6 @@ pub async fn run(bus: FrameBus) {
 
                         cooldown = 30; // skip ~1 second of frames
                     }
-                }
 
                 prev_frame = Some(frame);
             }

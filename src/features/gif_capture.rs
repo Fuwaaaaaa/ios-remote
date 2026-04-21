@@ -8,7 +8,6 @@ use tracing::info;
 ///
 /// Maintains a rolling buffer of recent frames and exports them
 /// as an animated GIF on demand.
-
 pub struct GifCapture {
     /// Rolling buffer of recent frames (RGBA downscaled).
     buffer: VecDeque<GifFrame>,

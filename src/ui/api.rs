@@ -42,7 +42,9 @@ pub struct StreamStats {
 /// Build the REST API router. All /api/* routes are protected by a bearer
 /// token middleware derived from `state.api_token`.
 pub fn router(state: Arc<ApiState>) -> Router {
-    let protected = Router::new()
+    
+
+    Router::new()
         // Status
         .route("/api/status", get(get_status))
         .route("/api/stats", get(get_stats))
@@ -63,9 +65,7 @@ pub fn router(state: Arc<ApiState>) -> Router {
         .route("/api/macros", get(list_macros))
         .route("/api/macros/run", post(run_macro))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_bearer))
-        .with_state(state);
-
-    protected
+        .with_state(state)
 }
 
 /// Axum middleware enforcing `Authorization: Bearer <token>` on /api/* routes.

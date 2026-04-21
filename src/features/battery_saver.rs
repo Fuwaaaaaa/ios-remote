@@ -1,7 +1,6 @@
 use tracing::info;
 
 /// Battery saver: reduce processing when laptop is on battery power.
-
 pub struct BatterySaver {
     pub enabled: bool,
     pub on_battery: bool,

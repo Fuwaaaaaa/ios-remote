@@ -1,6 +1,6 @@
-/// Device frame: render iPhone hardware frame around the mirrored screen.
-///
-/// Draws a stylized iPhone bezel for screenshots and recordings.
+//! Device frame: render iPhone hardware frame around the mirrored screen.
+//!
+//! Draws a stylized iPhone bezel for screenshots and recordings.
 
 pub struct DeviceFrame {
     pub model: DeviceModel,

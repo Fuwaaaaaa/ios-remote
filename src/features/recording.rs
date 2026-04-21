@@ -18,7 +18,7 @@ use tracing::{info, warn};
 /// Two entry points:
 /// - `run(rx)`      — legacy; record until the frame channel closes.
 /// - `RecordingController::{start, stop}` — preferred; allows the API / hotkey
-///    layer to start and stop recordings on demand.
+///   layer to start and stop recordings on demand.
 pub async fn run(rx: broadcast::Receiver<Arc<Frame>>) {
     let path = match create_output_path() {
         Ok(p) => p,
@@ -65,9 +65,8 @@ impl RecordingController {
         if self.active.swap(true, Ordering::SeqCst) {
             return Err("recording already in progress".to_string());
         }
-        let path = create_output_path().map_err(|e| {
+        let path = create_output_path().inspect_err(|_e| {
             self.active.store(false, Ordering::SeqCst);
-            e
         })?;
         {
             let mut slot = self
@@ -132,7 +131,7 @@ async fn record_inner(
                         let _ = file.write_all(&[0x00, 0x00, 0x00, 0x01]);
                         let _ = file.write_all(nalu);
                         frame_count += 1;
-                        if frame_count % 300 == 0 {
+                        if frame_count.is_multiple_of(300) {
                             info!(frames = frame_count, "Recording in progress");
                         }
                     }

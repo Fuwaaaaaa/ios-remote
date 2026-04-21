@@ -5,7 +5,6 @@ use tracing::info;
 ///
 /// Uses a simple SVG-to-PDF approach (generate SVG, convert via browser or tool).
 /// For a lightweight approach, we generate an HTML report and use browser print-to-PDF.
-
 pub struct PdfReport {
     title: String,
     entries: Vec<ReportEntry>,

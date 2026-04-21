@@ -1,4 +1,4 @@
-/// Presentation mode: fullscreen display with laser pointer.
+//! Presentation mode: fullscreen display with laser pointer.
 
 pub struct PresentationMode {
     pub enabled: bool,

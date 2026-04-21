@@ -4,7 +4,6 @@ use super::Frame;
 ///
 /// Finds the bounding box of non-background content. Useful when the
 /// iPhone shows letterboxed content (e.g., portrait app on landscape screen).
-
 pub struct CropResult {
     pub x: u32,
     pub y: u32,

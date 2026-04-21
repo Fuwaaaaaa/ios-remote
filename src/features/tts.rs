@@ -3,7 +3,6 @@ use tracing::info;
 /// Text-to-speech: read OCR results aloud via system TTS.
 ///
 /// Uses Windows SAPI (Speech API) via PowerShell.
-
 pub fn speak(text: &str) -> Result<(), String> {
     if text.is_empty() { return Ok(()); }
 

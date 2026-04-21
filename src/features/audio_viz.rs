@@ -4,7 +4,6 @@ use std::collections::VecDeque;
 ///
 /// Receives raw audio samples and generates a visual representation
 /// that can be overlaid on the display or shown in a separate panel.
-
 pub struct AudioVisualizer {
     waveform: VecDeque<f32>,
     spectrum: Vec<f32>,
