@@ -1,0 +1,51 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows release
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release
+        run: cargo build --locked --release
+
+      - name: Package artifact
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}"
+          $zip = "ios-remote-$ver-windows-x64.zip"
+          $files = @(
+            "target/release/ios-remote.exe",
+            "README.md",
+            "CHANGELOG.md",
+            "TESTING.md"
+          )
+          if (Test-Path "LICENSE") { $files += "LICENSE" }
+          Compress-Archive -Path $files -DestinationPath $zip -ErrorAction Stop
+          Write-Host "Built $zip"
+          "ASSET=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: CHANGELOG.md
+          files: ${{ env.ASSET }}
+          draft: false
+          prerelease: false

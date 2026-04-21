@@ -1,9 +1,9 @@
 [package]
 name = "ios-remote"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 license = "MIT"
-description = "iPhone screen mirroring & control via USB Type-C — written in Rust"
+description = "iPhone screen mirroring & control via USB Type-C — written in Rust (Windows-only)"
 
 [features]
 default = []
