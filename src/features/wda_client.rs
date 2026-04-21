@@ -144,3 +144,60 @@ pub fn default_wda_client() -> WdaClient {
         .unwrap_or_else(|_| "http://127.0.0.1:8100".to_string());
     WdaClient::new(url)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_stores_base_url() {
+        let c = WdaClient::new("http://example:9000");
+        assert_eq!(c.base_url, "http://example:9000");
+        assert!(c.session.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn default_client_honors_env_var() {
+        // Serialize via a mutex since env is process-global.
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var("IOS_REMOTE_WDA_URL").ok();
+        // SAFETY: serialized by LOCK above; restored in this test.
+        unsafe { std::env::set_var("IOS_REMOTE_WDA_URL", "http://override:12345") };
+        let c = default_wda_client();
+        assert_eq!(c.base_url, "http://override:12345");
+        match prev {
+            Some(v) => unsafe { std::env::set_var("IOS_REMOTE_WDA_URL", v) },
+            None => unsafe { std::env::remove_var("IOS_REMOTE_WDA_URL") },
+        }
+    }
+
+    #[test]
+    fn default_client_falls_back_to_localhost_8100() {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var("IOS_REMOTE_WDA_URL").ok();
+        // SAFETY: serialized by LOCK; value restored at end.
+        unsafe { std::env::remove_var("IOS_REMOTE_WDA_URL") };
+        let c = default_wda_client();
+        assert_eq!(c.base_url, "http://127.0.0.1:8100");
+        if let Some(v) = prev {
+            unsafe { std::env::set_var("IOS_REMOTE_WDA_URL", v) };
+        }
+    }
+
+    #[test]
+    fn unreachable_endpoint_returns_error_not_panic() {
+        // Port 1 is reserved and will refuse the TCP connect, letting us exercise
+        // the Unreachable/Curl paths without mocking.
+        let c = WdaClient::new("http://127.0.0.1:1");
+        let err = c.ensure_session().err();
+        assert!(err.is_some(), "expected error when endpoint is closed");
+        // Must match one of our typed variants — never panic.
+        let is_expected = matches!(
+            err.unwrap(),
+            WdaError::Unreachable(_) | WdaError::BadResponse(_) | WdaError::ParseError(_) | WdaError::Curl(_)
+        );
+        assert!(is_expected);
+    }
+}

@@ -237,6 +237,34 @@ pub fn list_sessions(dir: impl AsRef<Path>) -> Vec<PathBuf> {
 mod tests {
     use super::*;
 
+    fn write_session(dir: &std::path::Path, total_frames: u64, duration_secs: f64) {
+        std::fs::create_dir_all(dir).unwrap();
+        let header = SessionHeader {
+            start_time: "2026-04-21T00:00:00+00:00".into(),
+            width: 100,
+            height: 200,
+            total_frames,
+            duration_secs,
+        };
+        std::fs::write(
+            dir.join("session.json"),
+            serde_json::to_string(&header).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("bookmarks.json"),
+            serde_json::to_string::<Vec<Bookmark>>(&vec![]).unwrap(),
+        )
+        .unwrap();
+        // Three tiny NAL units separated by the 4-byte start code.
+        let video = vec![
+            0x00, 0x00, 0x00, 0x01, 0x10,
+            0x00, 0x00, 0x00, 0x01, 0x20, 0x21,
+            0x00, 0x00, 0x00, 0x01, 0x30,
+        ];
+        std::fs::write(dir.join("video.h264"), video).unwrap();
+    }
+
     #[test]
     fn indexes_annex_b_nal_units() {
         // Two NAL units: [0x00,0x00,0x00,0x01, AA, BB] [0x00,0x00,0x01, CC]
@@ -248,5 +276,49 @@ mod tests {
         assert_eq!(ranges.len(), 2);
         assert_eq!(&stream[ranges[0].0..ranges[0].1], &[0xAA, 0xBB]);
         assert_eq!(&stream[ranges[1].0..ranges[1].1], &[0xCC]);
+    }
+
+    #[test]
+    fn loader_reads_header_and_indexes_nals() {
+        let dir = std::env::temp_dir().join(format!(
+            "ios-remote-replay-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        write_session(&dir, 3, 3.0);
+
+        let player = SessionPlayer::load(&dir).unwrap();
+        assert_eq!(player.header.width, 100);
+        assert_eq!(player.header.height, 200);
+        assert_eq!(player.nal_count(), 3);
+        assert_eq!(player.nalu(0), Some(&[0x10][..]));
+        assert_eq!(player.nalu(1), Some(&[0x20, 0x21][..]));
+        assert_eq!(player.nalu(2), Some(&[0x30][..]));
+        assert_eq!(player.nalu(3), None);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn seek_proportional_maps_endpoints_to_first_and_last() {
+        let dir = std::env::temp_dir().join(format!(
+            "ios-remote-replay-seek-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        write_session(&dir, 3, 3.0);
+        let player = SessionPlayer::load(&dir).unwrap();
+
+        assert_eq!(player.seek_proportional(0), 0);
+        // Halfway through 3 seconds → NAL index 1 (of 3).
+        assert_eq!(player.seek_proportional(1_500_000), 1);
+        // Clamped to last index when requesting past the end.
+        assert_eq!(player.seek_proportional(u64::MAX), player.nal_count() - 1);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
