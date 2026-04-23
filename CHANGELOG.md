@@ -7,6 +7,15 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Live H.264 encoder** — `H264Encoder` subscribes to the shared `FrameBus`,
+  feeds each RGBA frame into an `ffmpeg` subprocess
+  (`-c:v libx264 -preset ultrafast -tune zerolatency`), and republishes the
+  resulting Annex-B NAL units back on the bus. This wires the screenshotr
+  PNG→RGBA capture path through to every H.264 consumer (recording, RTMP,
+  `SessionRecorder`) that was previously a no-op. The encoder auto-respawns
+  on resolution change and falls back silently (single warning) if ffmpeg
+  is missing. Loopback-safe: encoder output carries empty `rgba`, and the
+  display / encoder both ignore rgba-empty frames.
 - **Session replay playback** — `SessionPlaybackController` spawns ffmpeg
   (`-f h264 -i pipe:0 -f rawvideo -pix_fmt rgba pipe:1`), feeds recorded
   NAL units at the session's original frame rate, and publishes decoded

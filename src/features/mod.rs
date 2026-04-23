@@ -15,6 +15,7 @@ pub mod frame_analysis;
 pub mod game_mode;
 pub mod gestures;
 pub mod gif_capture;
+pub mod h264_encoder;
 pub mod heatmap;
 pub mod i18n;
 pub mod imgur_share;

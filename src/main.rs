@@ -138,6 +138,10 @@ async fn main() -> anyhow::Result<()> {
         features::display::run_display(display_bus.subscribe(), pip);
     });
 
+    // ── H.264 encoder (RGBA → H.264 on the fly; feeds recording / replay /
+    //    RTMP with populated `Frame.h264_nalu`). No-op if ffmpeg is missing.
+    features::h264_encoder::H264Encoder::new(frame_bus.clone()).spawn();
+
     // ── Recording controller (shared across CLI --record and the REST API) ──
     let recorder = features::recording::RecordingController::new(frame_bus.clone());
     if cli.record {

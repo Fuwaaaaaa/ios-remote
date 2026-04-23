@@ -28,6 +28,12 @@ them up through the same path as live capture. REST endpoints under
 controls end-to-end. ffmpeg remains an optional runtime dep (documented in
 the README Optional Dependencies table).
 
+Follow-up closed: **H.264 source wiring**. `src/features/h264_encoder.rs`
+runs an always-on RGBA→H.264 encoder that republishes NAL units onto the
+bus, so recording / replay / RTMP consumers see populated
+`Frame.h264_nalu`. Same ffmpeg-optional posture: missing binary → single
+warn + silent no-op, no panic.
+
 #### Decision record (kept for posterity)
 
 **Decoder decision: ffmpeg subprocess** (decided 2026-04-21).

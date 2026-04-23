@@ -44,8 +44,13 @@ pub fn run_display(mut frame_rx: broadcast::Receiver<Arc<Frame>>, pip_mode: bool
     let mut latest_frame: Option<Arc<Frame>> = None;
 
     while window.is_open() && !window.is_key_down(Key::Escape) && !window.is_key_down(Key::Q) {
-        // Drain all pending frames, keep the latest
+        // Drain all pending frames, keep the latest. H.264-only frames
+        // (rgba empty, h264_nalu set) are produced by the encoder loopback and
+        // must be ignored here or the window goes black.
         while let Ok(frame) = frame_rx.try_recv() {
+            if frame.rgba.is_empty() {
+                continue;
+            }
             width = frame.width as usize;
             height = frame.height as usize;
             buffer = rgba_to_rgb32(&frame.rgba, width, height);
