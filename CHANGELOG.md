@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Session replay playback** — `SessionPlaybackController` spawns ffmpeg
+  (`-f h264 -i pipe:0 -f rawvideo -pix_fmt rgba pipe:1`), feeds recorded
+  NAL units at the session's original frame rate, and publishes decoded
+  RGBA frames on the shared `FrameBus` so the existing display window
+  renders them without code changes. New REST endpoints:
+  `GET /api/replay/sessions`, `POST /api/replay/{load,play,pause,seek}`.
+  The Web Dashboard gains a Replay card with a session picker, play /
+  pause / seek controls, and bookmark shortcuts. ffmpeg stays an optional
+  runtime dependency (seam added via `with_ffmpeg_bin` for testability).
+  Seeking while playing is rejected — callers pause, seek, then resume.
+
 ## [0.5.0] — 2026-04-21
 
 Hardening, real-feature wiring, and a Windows-only declaration. Binary

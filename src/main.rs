@@ -149,11 +149,15 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // ── Session replay controller (shared with the REST API) ────────────────
+    let replay = features::session_replay::SessionPlaybackController::new(frame_bus.clone());
+
     // ── Web dashboard ───────────────────────────────────────────────────────
     let web_bus = frame_bus.clone();
     let web_token = api_token.clone();
     let web_config = app_config.clone();
     let web_recorder = recorder.clone();
+    let web_replay = replay.clone();
     tokio::spawn(async move {
         let api_state = std::sync::Arc::new(ui::api::ApiState {
             frame_bus: web_bus,
@@ -164,6 +168,7 @@ async fn main() -> anyhow::Result<()> {
             stats: std::sync::Arc::new(tokio::sync::Mutex::new(ui::api::StreamStats::default())),
             api_token: web_token,
             recorder: web_recorder,
+            replay: web_replay,
         });
         let app = ui::api::router(api_state.clone()).route(
             "/",

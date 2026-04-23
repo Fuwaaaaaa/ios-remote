@@ -18,9 +18,17 @@ no-op with `unimplemented!()` behind its feature gate. Remaining work:
 - README: hardware requirement (SteamVR-compatible headset) and driver notes
 - Acceptance: frames land in a floating panel in SteamVR with <80ms latency
 
-### Session replay decode
-Today `SessionPlayer` (src/features/session_replay.rs) only exposes
-`nalu(index)` and `seek_proportional()` — there is no `play()` method.
+### Session replay decode — DONE
+
+Closed in v0.6 prep. `SessionPlaybackController` in
+`src/features/session_replay.rs` now spawns ffmpeg and republishes decoded
+RGBA frames on the shared `FrameBus`; the existing display window picks
+them up through the same path as live capture. REST endpoints under
+`/api/replay/*` and a Replay section in the Web Dashboard expose the
+controls end-to-end. ffmpeg remains an optional runtime dep (documented in
+the README Optional Dependencies table).
+
+#### Decision record (kept for posterity)
 
 **Decoder decision: ffmpeg subprocess** (decided 2026-04-21).
 

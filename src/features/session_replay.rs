@@ -1,9 +1,13 @@
-use super::Frame;
+use super::{Frame, FrameBus};
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tracing::info;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tracing::{info, warn};
 
 /// Session replay: record full sessions and replay them later.
 ///
@@ -232,6 +236,236 @@ fn index_nal_units(bytes: &[u8]) -> Vec<(usize, usize)> {
     ranges
 }
 
+/// Single-flight playback controller that decodes a loaded `SessionPlayer`
+/// through an ffmpeg subprocess and republishes decoded RGBA frames on the
+/// shared `FrameBus`. The display window picks them up via the same path as
+/// live capture because both consumers only look at `Frame.rgba`.
+///
+/// Lifecycle: `load` → `play` → `pause` (or natural end) → optionally
+/// `seek` + `play` again. Seeking while playing is rejected; the dashboard
+/// pauses first, then seeks, then resumes.
+#[derive(Clone)]
+pub struct SessionPlaybackController {
+    active: Arc<AtomicBool>,
+    loaded: Arc<std::sync::Mutex<Option<Arc<SessionPlayer>>>>,
+    position: Arc<AtomicUsize>,
+    frame_bus: FrameBus,
+    /// Test seam: point at a nonexistent binary to exercise the spawn-failure
+    /// path without poking `$PATH`.
+    ffmpeg_bin: String,
+}
+
+impl SessionPlaybackController {
+    pub fn new(frame_bus: FrameBus) -> Self {
+        Self {
+            active: Arc::new(AtomicBool::new(false)),
+            loaded: Arc::new(std::sync::Mutex::new(None)),
+            position: Arc::new(AtomicUsize::new(0)),
+            frame_bus,
+            ffmpeg_bin: "ffmpeg".to_string(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_ffmpeg_bin(mut self, bin: impl Into<String>) -> Self {
+        self.ffmpeg_bin = bin.into();
+        self
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.active.load(Ordering::SeqCst)
+    }
+
+    pub fn current_position(&self) -> usize {
+        self.position.load(Ordering::SeqCst)
+    }
+
+    pub fn header(&self) -> Option<SessionHeader> {
+        self.loaded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|p| p.header.clone())
+    }
+
+    pub fn bookmarks(&self) -> Vec<Bookmark> {
+        self.loaded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|p| p.bookmarks.clone())
+            .unwrap_or_default()
+    }
+
+    /// Load a session from disk. Stops any in-flight playback; the new session
+    /// replaces the old one and position resets to the first NAL.
+    pub fn load(&self, dir: impl AsRef<Path>) -> Result<SessionHeader, String> {
+        // Stop before swapping so a stale writer task does not feed the new
+        // player's NALs into a doomed ffmpeg stdin.
+        self.active.store(false, Ordering::SeqCst);
+        let player = SessionPlayer::load(dir)?;
+        let header = player.header.clone();
+        self.position.store(0, Ordering::SeqCst);
+        let mut slot = self.loaded.lock().unwrap_or_else(|e| e.into_inner());
+        *slot = Some(Arc::new(player));
+        Ok(header)
+    }
+
+    /// Start decoding + publishing. Errors if no session is loaded or if
+    /// ffmpeg fails to spawn. Already-playing is a no-op (returns Ok).
+    pub fn play(&self) -> Result<(), String> {
+        let player = {
+            let slot = self.loaded.lock().unwrap_or_else(|e| e.into_inner());
+            slot.as_ref().cloned().ok_or("no session loaded")?
+        };
+        if self.active.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        let child = tokio::process::Command::new(&self.ffmpeg_bin)
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "h264",
+                "-i",
+                "pipe:0",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgba",
+                "pipe:1",
+            ])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|e| format!("spawn ffmpeg: {e}"))?;
+
+        self.active.store(true, Ordering::SeqCst);
+        let player_for_task = player.clone();
+        let position = self.position.clone();
+        let active = self.active.clone();
+        let frame_bus = self.frame_bus.clone();
+        tokio::spawn(async move {
+            if let Err(e) =
+                run_playback(player_for_task, position, active.clone(), frame_bus, child).await
+            {
+                warn!(error = %e, "playback task ended with error");
+            }
+            active.store(false, Ordering::SeqCst);
+        });
+        Ok(())
+    }
+
+    /// Flip the active flag off. The decode task observes it and tears down
+    /// its ffmpeg child (via `Child::kill_on_drop`).
+    pub fn pause(&self) {
+        self.active.store(false, Ordering::SeqCst);
+    }
+
+    /// Update the playback position by proportional seek. Requires the
+    /// playback to be paused; returns `Err` while playing to avoid racing the
+    /// live decode task on position updates.
+    pub fn seek(&self, timestamp_us: u64) -> Result<usize, String> {
+        if self.active.load(Ordering::SeqCst) {
+            return Err("pause before seeking".to_string());
+        }
+        let slot = self.loaded.lock().unwrap_or_else(|e| e.into_inner());
+        let player = slot.as_ref().ok_or("no session loaded")?;
+        let idx = player.seek_proportional(timestamp_us);
+        self.position.store(idx, Ordering::SeqCst);
+        Ok(idx)
+    }
+}
+
+async fn run_playback(
+    player: Arc<SessionPlayer>,
+    position: Arc<AtomicUsize>,
+    active: Arc<AtomicBool>,
+    frame_bus: FrameBus,
+    mut child: tokio::process::Child,
+) -> Result<(), String> {
+    let width = player.header.width;
+    let height = player.header.height;
+    if width == 0 || height == 0 {
+        active.store(false, Ordering::SeqCst);
+        return Err("session header has zero dimensions".to_string());
+    }
+    let frame_bytes = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|n| n.checked_mul(4))
+        .ok_or("frame size overflow")?;
+    let target_fps = if player.header.duration_secs > 0.0 && player.header.total_frames > 0 {
+        (player.header.total_frames as f64 / player.header.duration_secs).clamp(1.0, 120.0)
+    } else {
+        30.0
+    };
+    let frame_interval = Duration::from_secs_f64(1.0 / target_fps);
+
+    let mut stdin = child.stdin.take().ok_or("ffmpeg stdin unavailable")?;
+    let mut stdout = child.stdout.take().ok_or("ffmpeg stdout unavailable")?;
+
+    let writer_active = active.clone();
+    let writer_player = player.clone();
+    let writer_position = position.clone();
+    let writer = tokio::spawn(async move {
+        while writer_active.load(Ordering::SeqCst) {
+            let i = writer_position.load(Ordering::SeqCst);
+            let Some(nalu) = writer_player.nalu(i).map(<[u8]>::to_vec) else {
+                break;
+            };
+            if stdin.write_all(&[0x00, 0x00, 0x00, 0x01]).await.is_err() {
+                break;
+            }
+            if stdin.write_all(&nalu).await.is_err() {
+                break;
+            }
+            writer_position.store(i + 1, Ordering::SeqCst);
+            tokio::time::sleep(frame_interval).await;
+        }
+        // Close stdin so ffmpeg flushes any pending frames and exits.
+        let _ = stdin.shutdown().await;
+    });
+
+    let reader_active = active.clone();
+    let reader = tokio::spawn(async move {
+        let mut buf = vec![0u8; frame_bytes];
+        let mut decoded: u64 = 0;
+        while reader_active.load(Ordering::SeqCst) {
+            match stdout.read_exact(&mut buf).await {
+                Ok(_) => {
+                    let timestamp_us = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_micros() as u64)
+                        .unwrap_or(0);
+                    frame_bus.publish(Frame {
+                        width,
+                        height,
+                        rgba: buf.clone(),
+                        timestamp_us,
+                        h264_nalu: None,
+                    });
+                    decoded += 1;
+                }
+                Err(_) => break,
+            }
+        }
+        decoded
+    });
+
+    let _ = writer.await;
+    let decoded = reader.await.unwrap_or(0);
+    let _ = child.kill().await;
+    info!(
+        frames = decoded,
+        "Session playback ended (pause, EOF, or decoder exit)"
+    );
+    Ok(())
+}
+
 /// Convenience: list sessions available in `./recordings` (or another dir).
 pub fn list_sessions(dir: impl AsRef<Path>) -> Vec<PathBuf> {
     let mut out = Vec::new();
@@ -328,6 +562,93 @@ mod tests {
         assert_eq!(player.seek_proportional(1_500_000), 1);
         // Clamped to last index when requesting past the end.
         assert_eq!(player.seek_proportional(u64::MAX), player.nal_count() - 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn unique_session_dir(tag: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("ios-remote-playback-{tag}-{nanos}"))
+    }
+
+    #[tokio::test]
+    async fn controller_load_then_play_errors_when_ffmpeg_missing() {
+        let dir = unique_session_dir("missing-ffmpeg");
+        write_session(&dir, 3, 3.0);
+        let bus = FrameBus::new();
+        let ctl = SessionPlaybackController::new(bus)
+            .with_ffmpeg_bin("ios-remote-ffmpeg-definitely-not-installed");
+
+        let header = ctl.load(&dir).unwrap();
+        assert_eq!(header.width, 100);
+
+        let err = ctl.play().expect_err("spawn of bogus binary must fail");
+        assert!(err.contains("spawn ffmpeg"), "unexpected error: {err}");
+        assert!(
+            !ctl.is_active(),
+            "active flag must remain false on spawn failure"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn pause_when_idle_is_noop() {
+        let bus = FrameBus::new();
+        let ctl = SessionPlaybackController::new(bus);
+        assert!(!ctl.is_active());
+        ctl.pause();
+        assert!(!ctl.is_active());
+    }
+
+    #[test]
+    fn play_without_loaded_session_errors() {
+        let bus = FrameBus::new();
+        let ctl = SessionPlaybackController::new(bus);
+        let err = ctl.play().expect_err("play without load must error");
+        assert!(err.contains("no session loaded"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn seek_updates_position_when_paused() {
+        let dir = unique_session_dir("seek");
+        write_session(&dir, 3, 3.0);
+        let bus = FrameBus::new();
+        let ctl = SessionPlaybackController::new(bus);
+        ctl.load(&dir).unwrap();
+
+        assert_eq!(ctl.current_position(), 0);
+        // Halfway through the 3-second clip maps to NAL index 1 (matches
+        // seek_proportional_maps_endpoints_to_first_and_last above).
+        let idx = ctl.seek(1_500_000).unwrap();
+        assert_eq!(idx, 1);
+        assert_eq!(ctl.current_position(), 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Roundtrip test: requires ffmpeg on PATH. Boots the controller against a
+    /// tiny garbage NAL stream — ffmpeg will log decode errors but the spawn
+    /// must succeed and `play()` must flip the active flag. Ignored by default
+    /// because CI does not install ffmpeg.
+    #[tokio::test]
+    #[ignore]
+    async fn roundtrip_play_flips_active_with_real_ffmpeg() {
+        let dir = unique_session_dir("roundtrip");
+        write_session(&dir, 3, 3.0);
+        let bus = FrameBus::new();
+        let ctl = SessionPlaybackController::new(bus);
+        ctl.load(&dir).unwrap();
+
+        ctl.play().expect("ffmpeg must be on PATH for this test");
+        assert!(ctl.is_active());
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        ctl.pause();
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        assert!(!ctl.is_active());
 
         std::fs::remove_dir_all(&dir).ok();
     }

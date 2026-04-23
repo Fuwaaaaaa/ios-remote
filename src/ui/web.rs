@@ -73,6 +73,26 @@ const DASHBOARD_HTML: &str = r#"<!DOCTYPE html>
   </div>
 
   <div class="card">
+    <h2>Replay</h2>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
+      <select id="replay-select" style="flex:1; min-width:200px; background:#0f3460; color:#eee;
+              border:1px solid #00d4ff33; border-radius:6px; padding:8px;"></select>
+      <button class="btn" onclick="replayRefresh()">Refresh</button>
+      <button class="btn" onclick="replayLoad()">Load</button>
+    </div>
+    <div id="replay-header" style="font-size:12px; color:#888; margin-bottom:8px;">No session loaded.</div>
+    <div class="actions">
+      <button class="btn" onclick="replayPlay()">Play</button>
+      <button class="btn" onclick="replayPause()">Pause</button>
+    </div>
+    <div style="margin-top:12px;">
+      <input id="replay-seek" type="range" min="0" max="100" value="0" step="1" style="width:100%;"
+             onchange="replaySeek(this.value)">
+    </div>
+    <div id="replay-bookmarks" style="display:flex; gap:4px; flex-wrap:wrap; margin-top:8px;"></div>
+  </div>
+
+  <div class="card">
     <h2>Log</h2>
     <div id="log"></div>
   </div>
@@ -162,8 +182,86 @@ async function loadHistory() {
   } catch(e) { document.getElementById('history').textContent = 'Error loading history.'; }
 }
 
+let replayDurationUs = 0;
+
+async function replayRefresh() {
+  try {
+    const r = await api(`/api/replay/sessions`);
+    const j = await r.json();
+    const sel = document.getElementById('replay-select');
+    sel.innerHTML = '';
+    (j.sessions || []).forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.path;
+      const name = s.path.split(/[\\/]/).pop();
+      opt.textContent = `${name} (${s.total_frames}f, ${s.duration_secs.toFixed(1)}s)`;
+      sel.appendChild(opt);
+    });
+    if (!j.sessions?.length) {
+      const opt = document.createElement('option');
+      opt.textContent = 'No sessions under ./recordings';
+      opt.disabled = true;
+      sel.appendChild(opt);
+    }
+  } catch(e) { log(`Replay refresh error: ${e}`); }
+}
+
+async function replayLoad() {
+  const path = document.getElementById('replay-select').value;
+  if (!path) { log('No session selected'); return; }
+  const r = await api(`/api/replay/load`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ path })
+  });
+  const j = await r.json();
+  if (j.error) { log(`Replay load failed: ${j.error}`); return; }
+  const h = j.header || {};
+  replayDurationUs = Math.round((h.duration_secs || 0) * 1_000_000);
+  document.getElementById('replay-header').textContent =
+    `${h.width}×${h.height}, ${h.total_frames} frames, ${(h.duration_secs || 0).toFixed(1)}s`;
+  const bm = document.getElementById('replay-bookmarks');
+  bm.innerHTML = '';
+  (j.bookmarks || []).forEach(b => {
+    const btn = document.createElement('button');
+    btn.className = 'btn';
+    btn.textContent = b.label || `@${Math.round(b.timestamp_us/1000)}ms`;
+    btn.onclick = () => replaySeekUs(b.timestamp_us);
+    bm.appendChild(btn);
+  });
+  log(`Loaded: ${path}`);
+}
+
+async function replayPlay() {
+  const r = await api(`/api/replay/play`, {method:'POST'});
+  const j = await r.json();
+  log(j.status === 'playing' ? 'Replay playing' : `Replay play: ${j.error || j.status}`);
+}
+
+async function replayPause() {
+  await api(`/api/replay/pause`, {method:'POST'});
+  log('Replay paused');
+}
+
+async function replaySeek(pct) {
+  if (!replayDurationUs) { log('Load a session first'); return; }
+  const ts_us = Math.round((pct / 100) * replayDurationUs);
+  await replaySeekUs(ts_us);
+}
+
+async function replaySeekUs(ts_us) {
+  const r = await api(`/api/replay/seek`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ ts_us })
+  });
+  const j = await r.json();
+  log(j.status === 'seeked' ? `Seek → NAL ${j.position}` : `Seek: ${j.error || j.status}`);
+}
+
 setInterval(fetchStats, 1000);
 loadHistory();
+replayRefresh();
 log('Dashboard loaded');
 </script>
 </body>

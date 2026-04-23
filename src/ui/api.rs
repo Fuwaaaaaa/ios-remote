@@ -1,5 +1,6 @@
 use crate::config::{AppConfig, ConnectionHistory};
 use crate::features::recording::RecordingController;
+use crate::features::session_replay::{SessionPlaybackController, list_sessions};
 use crate::features::{FrameBus, screenshot};
 use axum::{
     Router,
@@ -26,6 +27,9 @@ pub struct ApiState {
     /// Recording lifecycle handle — shared with the recording task spawned by
     /// `RecordingController::start()`.
     pub recorder: RecordingController,
+    /// Playback lifecycle handle — shared with the decode task spawned by
+    /// `SessionPlaybackController::play()`.
+    pub replay: SessionPlaybackController,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -50,6 +54,12 @@ pub fn router(state: Arc<ApiState>) -> Router {
         .route("/api/screenshot", post(take_screenshot))
         .route("/api/recording/start", post(start_recording))
         .route("/api/recording/stop", post(stop_recording))
+        // Replay
+        .route("/api/replay/sessions", get(list_replay_sessions))
+        .route("/api/replay/load", post(load_replay))
+        .route("/api/replay/play", post(play_replay))
+        .route("/api/replay/pause", post(pause_replay))
+        .route("/api/replay/seek", post(seek_replay))
         // Config
         .route("/api/config", get(get_config))
         .route("/api/config", post(update_config))
@@ -167,6 +177,81 @@ async fn stop_recording(State(state): State<Arc<ApiState>>) -> Json<serde_json::
             "status": "idle",
             "error": "no recording in progress",
         })),
+    }
+}
+
+// ─── Replay handlers ─────────────────────────────────────────────────────────
+
+async fn list_replay_sessions() -> Json<serde_json::Value> {
+    let sessions: Vec<serde_json::Value> = list_sessions("recordings")
+        .into_iter()
+        .filter_map(|p| {
+            let header_path = p.join("session.json");
+            let raw = std::fs::read_to_string(&header_path).ok()?;
+            let header: crate::features::session_replay::SessionHeader =
+                serde_json::from_str(&raw).ok()?;
+            Some(serde_json::json!({
+                "path": p.display().to_string(),
+                "start_time": header.start_time,
+                "width": header.width,
+                "height": header.height,
+                "total_frames": header.total_frames,
+                "duration_secs": header.duration_secs,
+            }))
+        })
+        .collect();
+    Json(serde_json::json!({ "sessions": sessions }))
+}
+
+#[derive(Deserialize)]
+struct ReplayLoadRequest {
+    path: String,
+}
+
+async fn load_replay(
+    State(state): State<Arc<ApiState>>,
+    Json(req): Json<ReplayLoadRequest>,
+) -> Json<serde_json::Value> {
+    match state.replay.load(&req.path) {
+        Ok(header) => Json(serde_json::json!({
+            "status": "loaded",
+            "header": header,
+            "bookmarks": state.replay.bookmarks(),
+        })),
+        Err(e) => Json(serde_json::json!({ "status": "error", "error": e })),
+    }
+}
+
+async fn play_replay(State(state): State<Arc<ApiState>>) -> Json<serde_json::Value> {
+    match state.replay.play() {
+        Ok(()) => Json(serde_json::json!({ "status": "playing" })),
+        Err(e) => Json(serde_json::json!({ "status": "error", "error": e })),
+    }
+}
+
+async fn pause_replay(State(state): State<Arc<ApiState>>) -> Json<serde_json::Value> {
+    state.replay.pause();
+    Json(serde_json::json!({
+        "status": "paused",
+        "position": state.replay.current_position(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct ReplaySeekRequest {
+    ts_us: u64,
+}
+
+async fn seek_replay(
+    State(state): State<Arc<ApiState>>,
+    Json(req): Json<ReplaySeekRequest>,
+) -> Json<serde_json::Value> {
+    match state.replay.seek(req.ts_us) {
+        Ok(position) => Json(serde_json::json!({
+            "status": "seeked",
+            "position": position,
+        })),
+        Err(e) => Json(serde_json::json!({ "status": "error", "error": e })),
     }
 }
 
