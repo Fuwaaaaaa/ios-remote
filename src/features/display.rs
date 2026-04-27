@@ -1,8 +1,9 @@
-use crate::features::display_state::DisplayState;
+use crate::features::color_picker;
+use crate::features::display_state::{DisplayState, PendingInteractive};
 use crate::features::recording::RecordingController;
 use crate::features::session_replay::SessionPlaybackController;
 use crate::features::{Frame, screenshot};
-use minifb::{Key, Window, WindowOptions};
+use minifb::{Key, MouseButton, MouseMode, Window, WindowOptions};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use tracing::info;
@@ -49,6 +50,9 @@ pub fn run_display(
     let mut width = init_w;
     let mut height = init_h;
     let mut latest_frame: Option<Arc<Frame>> = None;
+    // Edge detection on the left mouse button so a single press completes
+    // exactly one PendingInteractive action, not one per frame held.
+    let mut mouse_was_down = false;
 
     while window.is_open() && !window.is_key_down(Key::Escape) && !window.is_key_down(Key::Q) {
         // Drain all pending frames, keep the latest. H.264-only frames
@@ -85,6 +89,16 @@ pub fn run_display(
             }
         }
 
+        // Pending interactive actions land on the rising edge of left click.
+        let mouse_down = window.get_mouse_down(MouseButton::Left);
+        if mouse_down
+            && !mouse_was_down
+            && let Some(ref frame) = latest_frame
+        {
+            resolve_pending_click(&display_state, frame, &window);
+        }
+        mouse_was_down = mouse_down;
+
         // Activity indicator: refresh the title only when the state flips so
         // we're not allocating + Win32-call'ing every frame.
         let next_title = compose_title(pip_mode, recorder.is_active(), replay.is_active());
@@ -101,6 +115,51 @@ pub fn run_display(
     }
 
     info!("Display window closed");
+}
+
+/// Resolve any PendingInteractive that's waiting on a click.
+///
+/// `get_unscaled_mouse_pos` returns coordinates in *buffer* space — i.e.
+/// the cropped post-zoom view we last rendered. We add the zoom offset to
+/// recover the source-frame pixel; if zoom is 1.0 the offset is 0 and
+/// this is a pass-through.
+fn resolve_pending_click(
+    display_state: &Arc<Mutex<DisplayState>>,
+    frame: &Frame,
+    window: &Window,
+) {
+    let mut state = display_state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if state.pending == PendingInteractive::Idle {
+        return;
+    }
+    let Some((bx, by)) = window.get_unscaled_mouse_pos(MouseMode::Discard) else {
+        return; // mouse outside drawing area
+    };
+    match state.pending {
+        PendingInteractive::ColorPick => {
+            let sx = (state.zoom.offset_x + bx) as u32;
+            let sy = (state.zoom.offset_y + by) as u32;
+            match color_picker::pick_color(frame, sx, sy) {
+                Some(picked) => {
+                    info!(
+                        x = sx,
+                        y = sy,
+                        hex = %picked.hex,
+                        rgb = %picked.rgb,
+                        "Color picked"
+                    );
+                    state.last_picked = Some(picked);
+                }
+                None => {
+                    tracing::warn!(x = sx, y = sy, "color_pick: out of bounds");
+                }
+            }
+            state.pending = PendingInteractive::Idle;
+        }
+        PendingInteractive::Idle => {} // already handled above
+    }
 }
 
 fn compose_title(pip: bool, recording: bool, replaying: bool) -> String {
