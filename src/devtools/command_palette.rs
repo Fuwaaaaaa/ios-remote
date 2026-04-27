@@ -420,11 +420,53 @@ pub fn execute(action_id: &str, state: &ApiState) -> Result<CommandResult, Comma
             std::process::exit(0);
         }
 
-        // ── Not yet wired (Phase B: needs shared display-window state) ─────
-        "zoom_in" | "zoom_out" | "zoom_reset" | "pip_toggle" | "game_mode" | "stats_toggle"
-        | "annotation_clear" => Err(CommandError::NotDispatchable {
-            action: action_id.to_string(),
-            reason: "display-state actions are not wired yet (Phase B)",
+        // ── Display state (Phase B) ─────────────────────────────────────────
+        "zoom_in" => with_display(state, |d| {
+            // Zoom toward the center of the source frame (no mouse coords
+            // available from a button press).
+            let cx = d.zoom.src_width as f32 * 0.5;
+            let cy = d.zoom.src_height as f32 * 0.5;
+            d.zoom.zoom(1.0, cx, cy);
+            Ok(format!("zoom level: {:.2}x", d.zoom.level))
+        })
+        .map(|m| CommandResult::ok("zoom_in", m)),
+        "zoom_out" => with_display(state, |d| {
+            let cx = d.zoom.src_width as f32 * 0.5;
+            let cy = d.zoom.src_height as f32 * 0.5;
+            d.zoom.zoom(-1.0, cx, cy);
+            Ok(format!("zoom level: {:.2}x", d.zoom.level))
+        })
+        .map(|m| CommandResult::ok("zoom_out", m)),
+        "zoom_reset" => with_display(state, |d| {
+            d.zoom.reset();
+            Ok("zoom reset".to_string())
+        })
+        .map(|m| CommandResult::ok("zoom_reset", m)),
+        "game_mode" => with_display(state, |d| {
+            let on = d.game_mode.toggle();
+            Ok(format!("game mode {}", if on { "on" } else { "off" }))
+        })
+        .map(|m| CommandResult::ok("game_mode", m)),
+        "stats_toggle" => with_display(state, |d| {
+            d.stats_visible = !d.stats_visible;
+            Ok(format!(
+                "stats overlay {}",
+                if d.stats_visible { "on" } else { "off" }
+            ))
+        })
+        .map(|m| CommandResult::ok("stats_toggle", m)),
+        "annotation_clear" => with_display(state, |d| {
+            d.annotations.clear();
+            Ok("annotations cleared".to_string())
+        })
+        .map(|m| CommandResult::ok("annotation_clear", m)),
+        // pip_toggle stays 409 — `minifb` sets `topmost` at window creation
+        // and offers no runtime toggle. Flipping it from a button needs a
+        // direct Win32 SetWindowPos call against the display window's HWND,
+        // which is a separate PR.
+        "pip_toggle" => Err(CommandError::NotDispatchable {
+            action: "pip_toggle".into(),
+            reason: "minifb topmost is set at window creation; runtime toggle requires a Win32 SetWindowPos hack — separate PR",
         }),
 
         // ── Interactive (Phase C: needs mouse events from display) ──────────
@@ -495,6 +537,24 @@ pub fn execute(action_id: &str, state: &ApiState) -> Result<CommandResult, Comma
     }
 }
 
+/// Lock the shared display state, run a mutation, format the result.
+/// Centralized so every Phase B handler reports lock-poisoning the same
+/// way (it should never happen — DisplayState mutations are infallible —
+/// but if it does we want a 500 with a clear cause, not a panic).
+fn with_display<F>(state: &ApiState, f: F) -> Result<String, CommandError>
+where
+    F: FnOnce(&mut crate::features::display_state::DisplayState) -> Result<String, String>,
+{
+    let mut guard = state
+        .display
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    f(&mut guard).map_err(|m| CommandError::Failed {
+        action: "display_state".into(),
+        message: m,
+    })
+}
+
 /// Launch a URL via the Windows shell (`explorer <url>`). Falls back to
 /// `cmd /C start` if the explorer call fails so users with custom
 /// default-browser handlers still get a response.
@@ -540,6 +600,9 @@ mod tests {
             recorder: crate::features::recording::RecordingController::new(bus.clone()),
             replay: crate::features::session_replay::SessionPlaybackController::new(bus),
             dashboard_url: "http://127.0.0.1:8080".into(),
+            display: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::features::display_state::DisplayState::new(),
+            )),
         }
     }
 
@@ -572,16 +635,53 @@ mod tests {
     }
 
     #[test]
-    fn phase_b_and_c_actions_still_report_not_dispatchable() {
+    fn pip_toggle_and_phase_c_actions_still_report_not_dispatchable() {
         let state = dummy_state();
-        // zoom_in is Phase B, color_pick is Phase C — both stay 409 until
-        // their respective follow-up PRs land.
-        for id in ["zoom_in", "color_pick"] {
+        // pip_toggle still 409 (minifb topmost runtime toggle is a separate
+        // PR). color_pick is Phase C (needs mouse events). macro_run needs
+        // arguments. All three exercise distinct NotDispatchable reasons.
+        for id in ["pip_toggle", "color_pick", "macro_run"] {
             let err = execute(id, &state).expect_err("should not be dispatchable yet");
             assert!(
                 matches!(err, CommandError::NotDispatchable { .. }),
                 "{id} should be NotDispatchable, got {err:?}"
             );
         }
+    }
+
+    #[test]
+    fn phase_b_actions_now_dispatchable() {
+        let state = dummy_state();
+        // 6 of 7 Phase B actions wired — toggles and resets are state-only,
+        // safe to call without a connected device.
+        for id in [
+            "zoom_in",
+            "zoom_out",
+            "zoom_reset",
+            "game_mode",
+            "stats_toggle",
+            "annotation_clear",
+        ] {
+            let r = execute(id, &state)
+                .unwrap_or_else(|e| panic!("{id} should dispatch in Phase B, got {e:?}"));
+            assert_eq!(r.action, id);
+            assert!(!r.message.is_empty());
+        }
+    }
+
+    #[test]
+    fn zoom_state_persists_across_dispatches() {
+        let state = dummy_state();
+        let r1 = execute("zoom_in", &state).expect("zoom_in 1");
+        assert!(r1.message.contains("zoom level"));
+        // After two zoom_in calls the level should be ≥ 1.2 (each press
+        // adds 0.1 in ZoomState::zoom).
+        let _ = execute("zoom_in", &state).expect("zoom_in 2");
+        let level = state.display.lock().unwrap().zoom.level;
+        assert!(level > 1.15, "expected zoom level >1.15, got {level}");
+
+        execute("zoom_reset", &state).expect("zoom_reset");
+        let level = state.display.lock().unwrap().zoom.level;
+        assert!((level - 1.0).abs() < 1e-6, "expected reset to 1.0, got {level}");
     }
 }

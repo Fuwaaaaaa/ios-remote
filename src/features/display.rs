@@ -1,8 +1,9 @@
+use crate::features::display_state::DisplayState;
 use crate::features::recording::RecordingController;
 use crate::features::session_replay::SessionPlaybackController;
 use crate::features::{Frame, screenshot};
 use minifb::{Key, Window, WindowOptions};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use tracing::info;
 
@@ -20,6 +21,7 @@ pub fn run_display(
     pip_mode: bool,
     recorder: RecordingController,
     replay: SessionPlaybackController,
+    display_state: Arc<Mutex<DisplayState>>,
 ) {
     let init_w = 960;
     let init_h = 540;
@@ -56,9 +58,20 @@ pub fn run_display(
             if frame.rgba.is_empty() {
                 continue;
             }
-            width = frame.width as usize;
-            height = frame.height as usize;
-            buffer = rgba_to_rgb32(&frame.rgba, width, height);
+            // Apply zoom transform if active. Source frame dimensions are
+            // also pushed into ZoomState so dispatch-driven zoom_* calls
+            // can clamp pan offsets correctly.
+            let (rgba_view, w, h) = {
+                let mut state = display_state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                state.zoom.src_width = frame.width;
+                state.zoom.src_height = frame.height;
+                state.zoom.apply(&frame.rgba, frame.width, frame.height)
+            };
+            width = w as usize;
+            height = h as usize;
+            buffer = rgba_to_rgb32(&rgba_view, width, height);
             latest_frame = Some(frame);
         }
 

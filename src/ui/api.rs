@@ -1,4 +1,5 @@
 use crate::config::{AppConfig, ConnectionHistory};
+use crate::features::display_state::DisplayState;
 use crate::features::recording::RecordingController;
 use crate::features::session_replay::{SessionPlaybackController, list_sessions};
 use crate::features::{FrameBus, screenshot};
@@ -35,6 +36,11 @@ pub struct ApiState {
     /// `web_dashboard` command can launch a browser at the right URL even
     /// when `--web-port` or `--lan` shifts it.
     pub dashboard_url: String,
+    /// Display-window state shared between the render loop and dispatch
+    /// handlers (zoom, game mode, annotations, stats overlay visibility).
+    /// `std::sync::Mutex` deliberately — locks are short, the display
+    /// thread reads it every frame on a non-async path.
+    pub display: Arc<std::sync::Mutex<DisplayState>>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -441,6 +447,7 @@ mod tests {
             recorder: RecordingController::new(bus.clone()),
             replay: SessionPlaybackController::new(bus),
             dashboard_url: "http://127.0.0.1:8080".into(),
+            display: Arc::new(std::sync::Mutex::new(DisplayState::new())),
         })
     }
 
@@ -454,8 +461,8 @@ mod tests {
     #[tokio::test]
     async fn not_dispatchable_command_returns_409() {
         let state = dummy_state();
-        // zoom_in is intentionally Phase B — should be 409 Conflict.
-        let resp = run_command(State(state), Path("zoom_in".into())).await;
+        // color_pick is Phase C (needs mouse events) — still 409 Conflict.
+        let resp = run_command(State(state), Path("color_pick".into())).await;
         assert_eq!(resp.status(), StatusCode::CONFLICT);
     }
 
