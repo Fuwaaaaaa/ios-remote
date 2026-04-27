@@ -4,6 +4,38 @@ All notable changes to this project are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **WASAPI loopback audio capture + Whisper subtitles end-to-end** —
+  `src/features/audio_capture.rs` introduces an `AudioBus` /
+  `AudioCapture::spawn` pair that opens the default Windows output device
+  in WASAPI loopback mode via `cpal`, with mic fallback. A transcription
+  pump down-mixes to mono, resamples to 16 kHz, and feeds 5-second windows
+  into `Transcriber::transcribe_pcm` (new). Local whisper.cpp consumes the
+  f32 buffer directly; the OpenAI HTTP path keeps working for non-`whisper`
+  builds. The display loop renders the live subtitle bar using a richer
+  5x7 bitmap font (full A–Z, a–z, common punctuation) shared with the
+  stats overlay. New routes `GET /api/audio/status` and
+  `GET /api/subtitles` expose state to the dashboard. Configurable via the
+  new `[audio]` block in `ios-remote.toml` (`source`, `chunk_secs`,
+  `language`).
+- **`audio_capture` feature flag** — gates the cpal dep so default builds
+  stay slim; `whisper` now implies `audio_capture` so the end-to-end
+  pipeline is reachable.
+- **CI: `whisper` build job** — Windows runner with LLVM/libclang installed
+  builds `--features whisper` so whisper-rs-sys cannot bitrot silently.
+
+### Changed
+- `Transcriber` exposes `now_ms()` so the capture pump and display loop
+  share a single monotonic clock for subtitle timestamps and visibility
+  windows.
+- WAV byte layout extracted to `audio_viz::pcm16_to_wav_bytes` /
+  `f32_to_wav_bytes` and reused by both `AudioRecorder::save_wav` and the
+  OpenAI transcription fallback.
+- `run_display` now accepts `Option<Arc<Mutex<Transcriber>>>`. `None` =
+  no-op (default builds).
+
 ## [0.6.0] — 2026-04-27
 
 The big v0.6 theme is **dispatch unification** — REST, Stream Deck, and

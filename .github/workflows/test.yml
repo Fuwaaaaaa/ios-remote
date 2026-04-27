@@ -43,9 +43,33 @@ jobs:
       - name: Build with experimental feature (quarantined scaffolds)
         run: cargo build --locked --features experimental
 
-      # `whisper` feature pulls whisper-rs-sys which needs libclang. A dedicated
-      # build job with llvm setup can be added when we start shipping binaries
-      # with that feature enabled.
+      - name: Build with audio_capture feature (WASAPI loopback)
+        run: cargo build --locked --features audio_capture
+
+  whisper:
+    name: Build with whisper (LLVM, libclang)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: whisper
+
+      - name: Install LLVM (for whisper-rs-sys / bindgen)
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "17"
+
+      - name: Build with whisper feature
+        run: cargo build --locked --features whisper
+        env:
+          LIBCLANG_PATH: ${{ env.LLVM_PATH }}\bin
 
   audit:
     name: cargo audit (advisory scan)

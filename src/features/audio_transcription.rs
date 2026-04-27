@@ -1,13 +1,18 @@
+use std::time::Instant;
 use tracing::info;
 
 /// Audio transcription: real-time speech-to-text from received audio.
 ///
 /// Sends audio to Whisper API (OpenAI) or local whisper.cpp for transcription.
 /// Displays subtitles as an overlay on the mirrored screen.
+///
+/// The capture pump and display thread both consult `now_ms()` so a single
+/// monotonic clock anchors subtitle timestamps and visibility windows.
 pub struct Transcriber {
     pub enabled: bool,
     pub subtitles: Vec<Subtitle>,
     max_subtitles: usize,
+    started: Instant,
 }
 
 #[derive(Clone, Debug)]
@@ -23,28 +28,38 @@ impl Transcriber {
             enabled: false,
             subtitles: Vec::new(),
             max_subtitles: 50,
+            started: Instant::now(),
         }
     }
 
-    /// Transcribe a chunk of audio (WAV bytes) using Whisper.
-    pub fn transcribe_chunk(
+    /// Monotonic milliseconds since this Transcriber was created.
+    pub fn now_ms(&self) -> u64 {
+        self.started.elapsed().as_millis() as u64
+    }
+
+    /// Transcribe a chunk of 16 kHz mono f32 PCM samples (the rate Whisper
+    /// expects). Local whisper.cpp consumes f32 directly; the OpenAI fallback
+    /// path encodes a WAV in-memory and shells out to curl.
+    pub fn transcribe_pcm(
         &mut self,
-        wav_data: &[u8],
+        pcm_16k_mono: &[f32],
         timestamp_ms: u64,
     ) -> Result<String, String> {
         // Try local whisper.cpp first; fall through to the API on any error.
-        if let Ok(text) = self.try_local_whisper(wav_data) {
-            self.add_subtitle(&text, timestamp_ms);
+        if let Ok(text) = self.try_local_whisper_pcm(pcm_16k_mono) {
+            if !text.is_empty() {
+                self.add_subtitle(&text, timestamp_ms);
+            }
             return Ok(text);
         }
 
-        // Try OpenAI Whisper API
+        // OpenAI Whisper API fallback — needs a WAV file on disk for the curl
+        // multipart upload.
         let api_key = std::env::var("OPENAI_API_KEY")
             .map_err(|_| "OPENAI_API_KEY not set. Set it for audio transcription.".to_string())?;
-
-        // Save temp WAV file for curl upload
+        let wav = super::audio_viz::f32_to_wav_bytes(pcm_16k_mono, 16_000, 1);
         let temp = std::env::temp_dir().join("ios_remote_audio.wav");
-        std::fs::write(&temp, wav_data).map_err(|e| e.to_string())?;
+        std::fs::write(&temp, &wav).map_err(|e| e.to_string())?;
 
         let output = std::process::Command::new("curl")
             .args([
@@ -72,12 +87,12 @@ impl Transcriber {
         Ok(text)
     }
 
-    /// Transcribe using the `whisper-rs` crate bindings to whisper.cpp.
-    /// The model path comes from `IOS_REMOTE_WHISPER_MODEL` (default
+    /// Transcribe 16 kHz mono f32 samples using `whisper-rs`. The model path
+    /// comes from `IOS_REMOTE_WHISPER_MODEL` (default
     /// `%APPDATA%/ios-remote/models/ggml-base.bin`). Only active when built
     /// with `--features whisper`.
     #[cfg(feature = "whisper")]
-    fn try_local_whisper(&self, wav_data: &[u8]) -> Result<String, String> {
+    fn try_local_whisper_pcm(&self, samples: &[f32]) -> Result<String, String> {
         use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
         let model_path = std::env::var("IOS_REMOTE_WHISPER_MODEL").unwrap_or_else(|_| {
@@ -92,7 +107,6 @@ impl Transcriber {
             ));
         }
 
-        let samples = wav_to_f32(wav_data).map_err(|e| format!("wav decode: {e}"))?;
         let ctx = WhisperContext::new_with_params(&model_path, WhisperContextParameters::default())
             .map_err(|e| format!("whisper init: {e}"))?;
         let mut state = ctx
@@ -103,7 +117,7 @@ impl Transcriber {
         params.set_print_progress(false);
         params.set_print_special(false);
         state
-            .full(params, &samples)
+            .full(params, samples)
             .map_err(|e| format!("whisper run: {e}"))?;
 
         let n = state.full_n_segments().map_err(|e| e.to_string())?;
@@ -116,10 +130,10 @@ impl Transcriber {
     }
 
     /// Placeholder that reports the feature is not enabled. When compiled
-    /// without `--features whisper` the caller should fall through to the
-    /// OpenAI API path.
+    /// without `--features whisper` the caller falls through to the OpenAI
+    /// API path.
     #[cfg(not(feature = "whisper"))]
-    fn try_local_whisper(&self, _wav_data: &[u8]) -> Result<String, String> {
+    fn try_local_whisper_pcm(&self, _samples: &[f32]) -> Result<String, String> {
         Err("whisper feature not enabled (build with --features whisper)".to_string())
     }
 
@@ -142,15 +156,15 @@ impl Transcriber {
             .collect()
     }
 
-    /// Draw subtitle overlay at bottom of frame.
-    #[allow(dead_code)]
+    /// Draw subtitle overlay at bottom of frame using the shared 5x7 bitmap
+    /// font from [`super::stats_overlay`]. Long lines are wrapped onto up to
+    /// two rows so a 5-second chunk fits in the bar without truncation.
     pub fn draw_subtitles(&self, rgba: &mut [u8], w: u32, h: u32, current_ms: u64) {
         let active = self.active_subtitles(current_ms);
         if active.is_empty() {
             return;
         }
 
-        // Dark background bar at bottom
         let bar_h = 40u32;
         let bar_y = h.saturating_sub(bar_h);
         for y in bar_y..h {
@@ -163,28 +177,115 @@ impl Transcriber {
                 }
             }
         }
-        // Text would be drawn with bitmap font (similar to stats_overlay)
+
+        // Use the most recent subtitle; older ones overlap and clutter.
+        let line = active.last().map(|s| s.text.as_str()).unwrap_or_default();
+        let max_chars = ((w.saturating_sub(16)) / 6).max(1) as usize;
+        let (line_a, line_b) = wrap_two_lines(line, max_chars);
+
+        let pad_x = 8u32;
+        let row1_y = bar_y + 6;
+        let row2_y = bar_y + 22;
+        super::stats_overlay::draw_text(
+            rgba,
+            w,
+            pad_x,
+            row1_y,
+            &line_a,
+            super::stats_overlay::COLOR_WHITE,
+        );
+        if !line_b.is_empty() {
+            super::stats_overlay::draw_text(
+                rgba,
+                w,
+                pad_x,
+                row2_y,
+                &line_b,
+                super::stats_overlay::COLOR_WHITE,
+            );
+        }
     }
 }
 
-/// Convert a 16-bit PCM WAV byte slice to normalized `f32` samples in
-/// [-1.0, 1.0]. Handles the standard 44-byte header emitted by common capture
-/// tools. Returns an error for unsupported bit depths.
-#[cfg(feature = "whisper")]
-fn wav_to_f32(wav: &[u8]) -> Result<Vec<f32>, String> {
-    if wav.len() < 44 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
-        return Err("not a RIFF/WAVE stream".to_string());
+/// Split `text` so that each returned line fits within `max_chars`,
+/// preferring word boundaries. The output is exactly two lines; long text
+/// is truncated with an ellipsis on the second line. If `text` fits on a
+/// single line, the second is empty.
+fn wrap_two_lines(text: &str, max_chars: usize) -> (String, String) {
+    let max = max_chars.max(1);
+    if text.chars().count() <= max {
+        return (text.to_string(), String::new());
     }
-    // Bits per sample is at offset 34 (little-endian u16).
-    let bits = u16::from_le_bytes([wav[34], wav[35]]);
-    if bits != 16 {
-        return Err(format!("only 16-bit PCM supported (got {bits})"));
+
+    let break_at = text
+        .char_indices()
+        .take(max + 1)
+        .filter(|(_, c)| c.is_whitespace())
+        .last()
+        .map(|(i, _)| i)
+        .unwrap_or_else(|| {
+            text.char_indices()
+                .nth(max)
+                .map(|(i, _)| i)
+                .unwrap_or(text.len())
+        });
+
+    let (head, tail) = text.split_at(break_at);
+    let head = head.trim_end().to_string();
+    let tail = tail.trim_start();
+    let mut second: String = tail.chars().take(max).collect();
+    if tail.chars().count() > max {
+        if second.chars().count() > 1 {
+            second = second.chars().take(max - 1).collect();
+        }
+        second.push('…');
     }
-    let samples = &wav[44..];
-    let mut out = Vec::with_capacity(samples.len() / 2);
-    for chunk in samples.chunks_exact(2) {
-        let s = i16::from_le_bytes([chunk[0], chunk[1]]);
-        out.push(s as f32 / 32768.0);
+    (head, second)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wrap_short_fits_single_line() {
+        let (a, b) = wrap_two_lines("hello world", 40);
+        assert_eq!(a, "hello world");
+        assert_eq!(b, "");
     }
-    Ok(out)
+
+    #[test]
+    fn wrap_breaks_on_word_boundary() {
+        // First line breaks at the last whitespace within the cap; the second
+        // line is truncated with an ellipsis when overflow remains.
+        let (a, b) = wrap_two_lines("the quick brown fox jumps", 10);
+        assert_eq!(a, "the quick");
+        assert!(b.starts_with("brown fox"), "got {b:?}");
+    }
+
+    #[test]
+    fn wrap_two_lines_fits_exactly() {
+        let (a, b) = wrap_two_lines("hello there friend", 12);
+        assert_eq!(a, "hello there");
+        assert_eq!(b, "friend");
+    }
+
+    #[test]
+    fn wrap_truncates_with_ellipsis() {
+        let text = "aaaaaaaaaa bbbbbbbbbb cccccccccc dddddddddd";
+        let (_a, b) = wrap_two_lines(text, 10);
+        assert!(b.ends_with('…'));
+    }
+
+    #[test]
+    fn add_subtitle_drops_oldest_past_cap() {
+        let mut t = Transcriber::new();
+        t.max_subtitles = 3;
+        for i in 0..5 {
+            t.add_subtitle(&format!("line {i}"), i * 1000);
+        }
+        assert_eq!(t.subtitles.len(), 3);
+        assert_eq!(t.subtitles[0].text, "line 2");
+        assert_eq!(t.subtitles[2].text, "line 4");
+    }
 }

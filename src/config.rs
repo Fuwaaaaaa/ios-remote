@@ -14,6 +14,10 @@ pub struct AppConfig {
     pub recording: RecordingSettings,
     pub network: NetworkSettings,
     pub features: FeatureToggles,
+    /// Audio capture / transcription settings. `serde(default)` so existing
+    /// `ios-remote.toml` files predating v0.7 still load.
+    #[serde(default)]
+    pub audio: AudioSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +83,26 @@ pub struct FeatureToggles {
     pub macros: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioSettings {
+    /// One of `loopback`, `mic`, `off`. Defaults to `loopback` (WASAPI).
+    pub source: String,
+    /// Window size fed to Whisper per chunk, in seconds.
+    pub chunk_secs: u32,
+    /// Optional language hint passed to Whisper. `None` = auto-detect.
+    pub language: Option<String>,
+}
+
+impl Default for AudioSettings {
+    fn default() -> Self {
+        Self {
+            source: "loopback".to_string(),
+            chunk_secs: 5,
+            language: None,
+        }
+    }
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -115,6 +139,7 @@ impl Default for AppConfig {
                 ai_vision: false,
                 macros: false,
             },
+            audio: AudioSettings::default(),
         }
     }
 }

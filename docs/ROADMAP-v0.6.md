@@ -84,23 +84,25 @@ Stream Deck loop has nothing to call.
 Acceptance: pressing the `Screenshot` button saves a PNG; pressing `Record`
 toggles the RecordingController.
 
-### Local Whisper end-to-end
-The decode side is already wired: `transcribe_chunk` →
-`add_subtitle` → `draw_subtitles` in src/features/audio_transcription.rs
-(lines 26-146). The `#[allow(dead_code)]` exists because **there is no
-audio source**: AirPlay audio was removed in v0.5, and no WASAPI/mic
-capture code lives under src/. The remaining work is almost entirely
-capture, not transcription:
+### Local Whisper end-to-end — DONE
 
-1. **Audio capture (the actual work)** — Windows WASAPI loopback for
-   system audio, with mic as a fallback. Feeds PCM chunks into
-   `transcribe_chunk`.
-2. **CI whisper build** — add an LLVM-enabled job that builds with
-   `--features whisper`. Blocker for landing any whisper work without
-   silent bitrot (see "CI matrix expansion" below).
+Closed in v0.7 prep. `src/features/audio_capture.rs` now opens the
+default Windows output device in WASAPI loopback mode via `cpal`
+(mic fallback when no output device is available), down-mixes to mono,
+resamples to 16 kHz, and feeds 5-second windows into the new
+`Transcriber::transcribe_pcm` (f32 path for whisper-rs; in-memory WAV +
+curl path for the OpenAI fallback). Subtitles render on the existing
+dark bar via the extended 5x7 bitmap font in `stats_overlay`.
 
-Acceptance: with a ggml model at the documented path and WASAPI loopback
-running, live system speech produces subtitle lines in the display window.
+The whisper-rs build is now a dedicated CI job
+(`whisper:` in `.github/workflows/test.yml`) with LLVM/libclang installed
+so the link path cannot bitrot. New `[audio]` config block, `audio_capture`
+feature flag, and `GET /api/audio/status` + `GET /api/subtitles`
+endpoints round out the surface.
+
+Acceptance met: with a ggml model at `%APPDATA%/ios-remote/models/ggml-base.bin`
+and WASAPI loopback running, live system speech produces subtitle lines
+in the display window.
 
 ## Backlog discovered during v0.5.0 smoke/review
 
@@ -145,10 +147,10 @@ WDA needs USB port 8100 forwarded before macros work. Today the user runs
 - ~~Add `cargo audit --deny warnings`~~ — landed as a soft-fail job on
   ubuntu-latest
 
-**Still open (blocks whisper work):**
-- Add a job that sets up LLVM and builds with `--features whisper` to
-  prevent `whisper-rs-sys` bitrot — currently deferred by comment in
-  `.github/workflows/test.yml`
+**Closed in v0.7 prep:**
+- `whisper:` job added to `.github/workflows/test.yml` — Windows runner
+  with LLVM 17 installed builds `--features whisper`. Resolves the
+  whisper-rs-sys bitrot risk that gated the audio pipeline above.
 
 ### Release hygiene
 - Add a `cargo deny` pass (licenses, banned crates, duplicate deps)

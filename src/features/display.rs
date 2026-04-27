@@ -1,3 +1,4 @@
+use crate::features::audio_transcription::Transcriber;
 use crate::features::color_picker;
 use crate::features::display_state::{DisplayState, PendingInteractive};
 use crate::features::recording::RecordingController;
@@ -23,6 +24,7 @@ pub fn run_display(
     recorder: RecordingController,
     replay: SessionPlaybackController,
     display_state: Arc<Mutex<DisplayState>>,
+    transcriber: Option<Arc<Mutex<Transcriber>>>,
 ) {
     let init_w = 960;
     let init_h = 540;
@@ -65,7 +67,7 @@ pub fn run_display(
             // Apply zoom transform if active. Source frame dimensions are
             // also pushed into ZoomState so dispatch-driven zoom_* calls
             // can clamp pan offsets correctly.
-            let (rgba_view, w, h) = {
+            let (mut rgba_view, w, h) = {
                 let mut state = display_state
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -73,6 +75,11 @@ pub fn run_display(
                 state.zoom.src_height = frame.height;
                 state.zoom.apply(&frame.rgba, frame.width, frame.height)
             };
+            if let Some(ref t) = transcriber {
+                let t = t.lock().unwrap_or_else(|p| p.into_inner());
+                let now_ms = t.now_ms();
+                t.draw_subtitles(&mut rgba_view, w, h, now_ms);
+            }
             width = w as usize;
             height = h as usize;
             buffer = rgba_to_rgb32(&rgba_view, width, height);

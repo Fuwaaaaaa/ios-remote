@@ -629,6 +629,7 @@ mod tests {
             display: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::features::display_state::DisplayState::new(),
             )),
+            transcriber: None,
         }
     }
 

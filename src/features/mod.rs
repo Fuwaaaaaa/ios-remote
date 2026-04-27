@@ -1,5 +1,7 @@
 pub mod ai_vision;
 pub mod annotation;
+#[cfg(feature = "audio_capture")]
+pub mod audio_capture;
 pub mod audio_transcription;
 pub mod audio_viz;
 pub mod auto_connect;

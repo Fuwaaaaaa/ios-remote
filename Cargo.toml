@@ -12,9 +12,14 @@ lua = ["mlua"]
 # Stream Deck HID support. Pulls in the elgato-streamdeck crate which uses
 # hidapi; on Windows the system ships the HID stack, nothing else to install.
 stream_deck = ["elgato-streamdeck"]
+# WASAPI loopback / mic capture via cpal. Drives the Transcriber when paired
+# with `whisper` (or with OPENAI_API_KEY for the API fallback). See README
+# §Audio capture.
+audio_capture = ["dep:cpal"]
 # Local Whisper transcription via whisper.cpp bindings. Requires a GGML model
-# file at runtime (see README).
-whisper = ["whisper-rs"]
+# file at runtime (see README). Implies `audio_capture` so the end-to-end
+# pipeline (capture → transcribe → subtitles) is actually reachable.
+whisper = ["whisper-rs", "audio_capture"]
 # Unwired scaffolding that compiled into v0.5 but never reached a startup
 # path. Kept under this flag during v0.6 stocktake so the designs survive
 # compiler scrutiny without bloating default builds. See docs/ROADMAP-v0.6.md
@@ -56,3 +61,6 @@ elgato-streamdeck = { version = "0.8", optional = true }
 
 # Local Whisper (optional) — enable with --features whisper
 whisper-rs = { version = "0.11", optional = true }
+
+# WASAPI loopback / mic capture (optional) — enable with --features audio_capture
+cpal = { version = "0.15", optional = true }

@@ -337,8 +337,50 @@ ai_vision = false
 | tesseract-ocr | OCRテキスト抽出 | [tesseract](https://github.com/tesseract-ocr/tesseract) |
 | ffmpeg | RTMP配信 / 録画変換 / セッションリプレイのデコード | [ffmpeg.org](https://ffmpeg.org) |
 | `ANTHROPIC_API_KEY` | AI画面理解 | [anthropic.com](https://console.anthropic.com) |
-| `OPENAI_API_KEY` | 音声文字起こし | [openai.com](https://platform.openai.com) |
+| `OPENAI_API_KEY` | 音声文字起こし（OpenAI Whisper API） | [openai.com](https://platform.openai.com) |
 | `IMGUR_CLIENT_ID` | Imgur即共有 | [imgur.com/account/settings/apps](https://imgur.com/account/settings/apps) |
+| ggml-base.bin | ローカル Whisper（API キー不要） | [whisper.cpp models](https://huggingface.co/ggerganov/whisper.cpp) |
+
+## Audio capture & transcription
+
+PC のシステム音声を **WASAPI ループバック**で取り込み、Whisper にかけて
+ライブ字幕として表示ウィンドウに重ねます（既定の出力デバイスがない場合は
+マイクへフォールバック）。
+
+### ビルドフラグ
+
+```sh
+# OpenAI Whisper API パス（OPENAI_API_KEY が必要、ローカルモデル不要）
+cargo build --features audio_capture
+
+# ローカル whisper.cpp パス（オフライン、ggml モデルが必要）
+cargo build --features whisper   # audio_capture を内包
+```
+
+### 設定
+
+`ios-remote.toml` の `[audio]` ブロック（既存 toml は自動で既定値が入ります）:
+
+```toml
+[audio]
+source = "loopback"   # "loopback" | "mic" | "off"
+chunk_secs = 5
+# language = "ja"     # 省略時は Whisper の自動判定
+```
+
+### 環境変数
+
+| 変数 | 用途 |
+|------|------|
+| `IOS_REMOTE_WHISPER_MODEL` | ggml モデルへのパス（既定 `%APPDATA%\ios-remote\models\ggml-base.bin`） |
+| `OPENAI_API_KEY` | ローカル whisper が使えない場合の API フォールバック |
+
+### REST
+
+| エンドポイント | 説明 |
+|----------------|------|
+| `GET /api/audio/status` | 現在のソースとアクティブな字幕 |
+| `GET /api/subtitles` | バッファに残る字幕履歴（最大 50 件） |
 
 ## Project Structure
 

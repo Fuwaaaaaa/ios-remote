@@ -154,6 +154,47 @@ async fn main() -> anyhow::Result<()> {
         features::display_state::DisplayState::new(),
     ));
 
+    // ── Audio capture + transcription (gated) ───────────────────────────────
+    // The transcriber is shared between the capture pump (writes subtitles)
+    // and the display loop (reads + draws them); both consult the same
+    // monotonic clock through `Transcriber::now_ms()`.
+    #[cfg(feature = "audio_capture")]
+    let (transcriber, _audio_handle) = {
+        use features::audio_capture::{AudioBus, AudioCapture, AudioSource};
+        let configured = features::audio_capture::AudioSource::parse(&app_config.audio.source)
+            .unwrap_or(AudioSource::Off);
+        if configured == AudioSource::Off {
+            tracing::info!("Audio capture: disabled by config");
+            (
+                None::<std::sync::Arc<std::sync::Mutex<features::audio_transcription::Transcriber>>>,
+                None,
+            )
+        } else {
+            let transcriber = std::sync::Arc::new(std::sync::Mutex::new(
+                features::audio_transcription::Transcriber::new(),
+            ));
+            let bus = AudioBus::new();
+            let handle = AudioCapture::new(bus.clone(), configured).spawn();
+            if handle.is_some() {
+                features::audio_capture::spawn_transcription_pump(
+                    bus,
+                    transcriber.clone(),
+                    app_config.audio.chunk_secs,
+                );
+            }
+            let transcriber_opt = if handle.is_some() {
+                Some(transcriber)
+            } else {
+                None
+            };
+            (transcriber_opt, handle)
+        }
+    };
+    #[cfg(not(feature = "audio_capture"))]
+    let transcriber: Option<
+        std::sync::Arc<std::sync::Mutex<features::audio_transcription::Transcriber>>,
+    > = None;
+
     // ── Display window (OS thread) ──────────────────────────────────────────
     // Spawned after recorder/replay/display_state exist so the title bar's
     // activity indicator and zoom transform can read state every frame.
@@ -161,6 +202,7 @@ async fn main() -> anyhow::Result<()> {
     let display_recorder = recorder.clone();
     let display_replay = replay.clone();
     let display_state_for_window = display_state.clone();
+    let display_transcriber = transcriber.clone();
     let pip = cli.pip;
     let display_handle = std::thread::spawn(move || {
         features::display::run_display(
@@ -169,6 +211,7 @@ async fn main() -> anyhow::Result<()> {
             display_recorder,
             display_replay,
             display_state_for_window,
+            display_transcriber,
         );
     });
 
@@ -192,6 +235,7 @@ async fn main() -> anyhow::Result<()> {
         replay: replay.clone(),
         dashboard_url,
         display: display_state.clone(),
+        transcriber: transcriber.clone(),
     });
 
     // ── Web dashboard ───────────────────────────────────────────────────────

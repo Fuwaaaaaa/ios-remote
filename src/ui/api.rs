@@ -1,4 +1,5 @@
 use crate::config::{AppConfig, ConnectionHistory};
+use crate::features::audio_transcription::Transcriber;
 use crate::features::display_state::DisplayState;
 use crate::features::recording::RecordingController;
 use crate::features::session_replay::{SessionPlaybackController, list_sessions};
@@ -41,6 +42,10 @@ pub struct ApiState {
     /// `std::sync::Mutex` deliberately — locks are short, the display
     /// thread reads it every frame on a non-async path.
     pub display: Arc<std::sync::Mutex<DisplayState>>,
+    /// Live transcriber. `Some` when WASAPI / mic capture is active (built
+    /// with `--features audio_capture` and a working device). Subtitles and
+    /// the audio source state are read/written through this handle.
+    pub transcriber: Option<Arc<std::sync::Mutex<Transcriber>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -86,6 +91,9 @@ pub fn router(state: Arc<ApiState>) -> Router {
         // Command palette dispatch
         .route("/api/command/{id}", post(run_command))
         .route("/api/commands", get(list_commands))
+        // Audio capture / subtitles
+        .route("/api/audio/status", get(get_audio_status))
+        .route("/api/subtitles", get(get_subtitles))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_bearer,
@@ -425,6 +433,58 @@ async fn run_command(State(state): State<Arc<ApiState>>, Path(id): Path<String>)
     }
 }
 
+/// `GET /api/audio/status` — returns whether audio capture is live and the
+/// recent subtitle window. The `enabled` flag distinguishes "feature flag
+/// off / no device" (Some(false) plus empty subtitles) from "device is
+/// streaming but silent" (Some(true), empty subtitles).
+async fn get_audio_status(State(state): State<Arc<ApiState>>) -> Json<serde_json::Value> {
+    let Some(t) = &state.transcriber else {
+        return Json(serde_json::json!({
+            "enabled": false,
+            "reason": "audio_capture feature disabled or no device",
+        }));
+    };
+    let t = t.lock().unwrap_or_else(|p| p.into_inner());
+    let now_ms = t.now_ms();
+    let active: Vec<_> = t
+        .active_subtitles(now_ms)
+        .iter()
+        .map(|s| {
+            serde_json::json!({
+                "text": s.text,
+                "start_ms": s.start_ms,
+                "duration_ms": s.duration_ms,
+            })
+        })
+        .collect();
+    Json(serde_json::json!({
+        "enabled": true,
+        "now_ms": now_ms,
+        "active_subtitles": active,
+    }))
+}
+
+/// `GET /api/subtitles` — full subtitle history kept by the Transcriber
+/// (capped at `Transcriber::max_subtitles`).
+async fn get_subtitles(State(state): State<Arc<ApiState>>) -> Json<serde_json::Value> {
+    let Some(t) = &state.transcriber else {
+        return Json(serde_json::json!({ "subtitles": [] }));
+    };
+    let t = t.lock().unwrap_or_else(|p| p.into_inner());
+    let items: Vec<_> = t
+        .subtitles
+        .iter()
+        .map(|s| {
+            serde_json::json!({
+                "text": s.text,
+                "start_ms": s.start_ms,
+                "duration_ms": s.duration_ms,
+            })
+        })
+        .collect();
+    Json(serde_json::json!({ "subtitles": items }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -445,6 +505,7 @@ mod tests {
             replay: SessionPlaybackController::new(bus),
             dashboard_url: "http://127.0.0.1:8080".into(),
             display: Arc::new(std::sync::Mutex::new(DisplayState::new())),
+            transcriber: None,
         })
     }
 

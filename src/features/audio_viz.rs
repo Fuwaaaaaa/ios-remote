@@ -131,25 +131,46 @@ impl AudioRecorder {
 
     /// Save as WAV file (PCM 16-bit mono).
     pub fn save_wav(&self, path: &str) -> Result<(), String> {
-        let data_size = (self.samples.len() * 2) as u32;
-        let file_size = 36 + data_size;
-        let mut buf = Vec::with_capacity(file_size as usize + 8);
-        buf.extend_from_slice(b"RIFF");
-        buf.extend_from_slice(&file_size.to_le_bytes());
-        buf.extend_from_slice(b"WAVE");
-        buf.extend_from_slice(b"fmt ");
-        buf.extend_from_slice(&16u32.to_le_bytes());
-        buf.extend_from_slice(&1u16.to_le_bytes()); // PCM
-        buf.extend_from_slice(&1u16.to_le_bytes()); // mono
-        buf.extend_from_slice(&self.sample_rate.to_le_bytes());
-        buf.extend_from_slice(&(self.sample_rate * 2).to_le_bytes());
-        buf.extend_from_slice(&2u16.to_le_bytes()); // block align
-        buf.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
-        buf.extend_from_slice(b"data");
-        buf.extend_from_slice(&data_size.to_le_bytes());
-        for &s in &self.samples {
-            buf.extend_from_slice(&s.to_le_bytes());
-        }
+        let buf = pcm16_to_wav_bytes(&self.samples, self.sample_rate, 1);
         std::fs::write(path, buf).map_err(|e| e.to_string())
     }
+}
+
+/// Encode a 16-bit PCM sample slice as RIFF/WAVE bytes (header + data).
+/// Channel count of 1 produces mono; 2 produces interleaved stereo. The
+/// transcriber and AudioRecorder share this so the byte layout drifts in
+/// exactly one place.
+pub fn pcm16_to_wav_bytes(samples: &[i16], sample_rate: u32, channels: u16) -> Vec<u8> {
+    let block_align = channels * 2;
+    let byte_rate = sample_rate * block_align as u32;
+    let data_size = (samples.len() * 2) as u32;
+    let file_size = 36 + data_size;
+    let mut buf = Vec::with_capacity(file_size as usize + 8);
+    buf.extend_from_slice(b"RIFF");
+    buf.extend_from_slice(&file_size.to_le_bytes());
+    buf.extend_from_slice(b"WAVE");
+    buf.extend_from_slice(b"fmt ");
+    buf.extend_from_slice(&16u32.to_le_bytes());
+    buf.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    buf.extend_from_slice(&channels.to_le_bytes());
+    buf.extend_from_slice(&sample_rate.to_le_bytes());
+    buf.extend_from_slice(&byte_rate.to_le_bytes());
+    buf.extend_from_slice(&block_align.to_le_bytes());
+    buf.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+    buf.extend_from_slice(b"data");
+    buf.extend_from_slice(&data_size.to_le_bytes());
+    for &s in samples {
+        buf.extend_from_slice(&s.to_le_bytes());
+    }
+    buf
+}
+
+/// Encode an f32 sample slice (range [-1.0, 1.0]) as 16-bit PCM WAV bytes.
+/// Out-of-range values are clamped before quantization.
+pub fn f32_to_wav_bytes(samples: &[f32], sample_rate: u32, channels: u16) -> Vec<u8> {
+    let pcm: Vec<i16> = samples
+        .iter()
+        .map(|s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
+        .collect();
+    pcm16_to_wav_bytes(&pcm, sample_rate, channels)
 }
