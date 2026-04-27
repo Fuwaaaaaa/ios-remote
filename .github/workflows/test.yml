@@ -43,9 +43,31 @@ jobs:
       - name: Build with experimental feature (quarantined scaffolds)
         run: cargo build --locked --features experimental
 
-      # `whisper` feature pulls whisper-rs-sys which needs libclang. A dedicated
-      # build job with llvm setup can be added when we start shipping binaries
-      # with that feature enabled.
+  whisper:
+    name: Build with whisper feature (Windows + LLVM)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: whisper
+
+      # whisper-rs-sys needs libclang/llvm to bindgen the whisper.cpp headers.
+      - name: Install LLVM
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "17.0"
+
+      - name: Build with whisper feature
+        env:
+          LIBCLANG_PATH: ${{ env.LLVM_PATH }}/bin
+        run: cargo build --locked --features whisper
 
   audit:
     name: cargo audit (advisory scan)
@@ -58,3 +80,15 @@ jobs:
         run: cargo install cargo-audit --locked
       - name: Run cargo audit
         run: cargo audit --deny warnings
+
+  deny:
+    name: cargo deny (licenses + bans + sources)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true  # soft-fail: surface drift, don't block merges
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
