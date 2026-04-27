@@ -123,11 +123,7 @@ pub fn run_display(
 /// the cropped post-zoom view we last rendered. We add the zoom offset to
 /// recover the source-frame pixel; if zoom is 1.0 the offset is 0 and
 /// this is a pass-through.
-fn resolve_pending_click(
-    display_state: &Arc<Mutex<DisplayState>>,
-    frame: &Frame,
-    window: &Window,
-) {
+fn resolve_pending_click(display_state: &Arc<Mutex<DisplayState>>, frame: &Frame, window: &Window) {
     let mut state = display_state
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -240,7 +236,10 @@ mod tests {
 
     #[test]
     fn idle_title_has_no_indicator() {
-        assert_eq!(compose_title(false, false, false), "ios-remote — USB Mirror");
+        assert_eq!(
+            compose_title(false, false, false),
+            "ios-remote — USB Mirror"
+        );
     }
 
     #[test]

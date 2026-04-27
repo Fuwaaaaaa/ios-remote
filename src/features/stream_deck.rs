@@ -191,8 +191,9 @@ pub fn run_event_loop(integration: StreamDeckIntegration, state: Arc<ApiState>) 
                         let state = state.clone();
                         // Off-thread so a slow handler doesn't backpressure
                         // the HID read loop.
-                        std::thread::spawn(move || {
-                            match crate::devtools::command_palette::execute(&action, &state) {
+                        std::thread::spawn(
+                            move || match crate::devtools::command_palette::execute(&action, &state)
+                            {
                                 Ok(r) => tracing::info!(
                                     action = %r.action,
                                     message = %r.message,
@@ -203,8 +204,8 @@ pub fn run_event_loop(integration: StreamDeckIntegration, state: Arc<ApiState>) 
                                     error = %e,
                                     "stream deck press failed"
                                 ),
-                            }
-                        });
+                            },
+                        );
                     }
                 }
                 prev.copy_from_slice(&buttons);

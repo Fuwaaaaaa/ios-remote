@@ -185,9 +185,7 @@ async fn main() -> anyhow::Result<()> {
     let api_state = std::sync::Arc::new(ui::api::ApiState {
         frame_bus: frame_bus.clone(),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(app_config.clone())),
-        history: std::sync::Arc::new(tokio::sync::Mutex::new(
-            config::ConnectionHistory::default(),
-        )),
+        history: std::sync::Arc::new(tokio::sync::Mutex::new(config::ConnectionHistory::default())),
         stats: std::sync::Arc::new(tokio::sync::Mutex::new(ui::api::StreamStats::default())),
         api_token: api_token.clone(),
         recorder: recorder.clone(),
