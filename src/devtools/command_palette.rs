@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::sync::OnceLock;
 
 /// Command palette: Ctrl+P style fuzzy search for all commands.
 ///
@@ -216,15 +217,19 @@ pub fn all_commands() -> Vec<Command> {
     ]
 }
 
+/// Cached command list. The set is fixed at compile time, so we build it
+/// exactly once on first access instead of per-call (the previous
+/// `Box::leak` on every `search()` call leaked ~3 KB each invocation).
+fn commands_cached() -> &'static [Command] {
+    static CACHE: OnceLock<Vec<Command>> = OnceLock::new();
+    CACHE.get_or_init(all_commands)
+}
+
 /// Fuzzy search commands by query.
 pub fn search(query: &str) -> Vec<&'static Command> {
-    let commands = all_commands();
     let query_lower = query.to_lowercase();
 
-    // Leak to get 'static lifetime (command list is fixed)
-    let commands: &'static Vec<Command> = Box::leak(Box::new(commands));
-
-    commands
+    commands_cached()
         .iter()
         .filter(|cmd| {
             cmd.name.to_lowercase().contains(&query_lower)
@@ -232,4 +237,285 @@ pub fn search(query: &str) -> Vec<&'static Command> {
                 || cmd.category.to_lowercase().contains(&query_lower)
         })
         .collect()
+}
+
+// ─── Dispatch ────────────────────────────────────────────────────────────────
+//
+// Phase A: 12 "ready" actions (no extra display-state plumbing required) are
+// wired to existing handlers via `ApiState`. The rest return a structured
+// error so callers (Stream Deck, REST API, hotkeys) can render a clear "not
+// yet" message instead of silently doing nothing.
+//
+// Phases B-D will expand this:
+//   B. Promote display-window state (zoom, pip, game_mode, stats, annotations)
+//      to shared handles so zoom_*/pip_toggle/game_mode/stats_toggle/
+//      annotation_clear become dispatchable.
+//   C. Wire interactive commands (color_pick, annotation_rect/arrow/text,
+//      ruler, privacy_add) once the display window pipes mouse events out.
+//   D. Picker dialogs (macro_run, lua_run, network_diag, settings,
+//      firewall_setup) and shell-out commands (web_dashboard).
+
+use crate::ui::api::ApiState;
+
+/// Errors that can arise while dispatching a command id.
+#[derive(Debug, thiserror::Error)]
+pub enum CommandError {
+    #[error("unknown action id: {0}")]
+    UnknownAction(String),
+    /// The action is recognized but its handler is not wired in this build
+    /// phase (or requires interactive UI input the dispatch path cannot
+    /// supply). The variant carries a stable reason so the caller can show a
+    /// helpful hint.
+    #[error("'{action}' is not dispatchable: {reason}")]
+    NotDispatchable {
+        action: String,
+        reason: &'static str,
+    },
+    /// No frame has been received yet — most analysis commands need one.
+    #[error("no frame available yet — connect a device first")]
+    NoFrame,
+    /// The handler ran but returned an error.
+    #[error("'{action}' failed: {message}")]
+    Failed { action: String, message: String },
+}
+
+/// Outcome of a successful dispatch.
+#[derive(Debug, Clone, Serialize)]
+pub struct CommandResult {
+    pub action: String,
+    pub message: String,
+}
+
+impl CommandResult {
+    fn ok(action: &str, message: impl Into<String>) -> Self {
+        Self {
+            action: action.to_string(),
+            message: message.into(),
+        }
+    }
+}
+
+/// Dispatch a command id to its handler.
+///
+/// Synchronous: every wired handler is itself sync (no async I/O). Network
+/// calls inside handlers (ai_describe, check_update) block briefly but the
+/// caller already runs them off the UI thread (Stream Deck loop, REST task).
+pub fn execute(action_id: &str, state: &ApiState) -> Result<CommandResult, CommandError> {
+    match action_id {
+        // ── Capture ─────────────────────────────────────────────────────────
+        "screenshot" => {
+            let frame = state.frame_bus.latest_frame().ok_or(CommandError::NoFrame)?;
+            let path = crate::features::screenshot::save_frame(&frame).map_err(|m| {
+                CommandError::Failed {
+                    action: "screenshot".into(),
+                    message: m,
+                }
+            })?;
+            Ok(CommandResult::ok("screenshot", format!("saved → {path}")))
+        }
+        "screenshot_clipboard" => {
+            crate::features::clipboard_sync::copy_screenshot_to_clipboard(&state.frame_bus)
+                .map_err(|m| CommandError::Failed {
+                    action: "screenshot_clipboard".into(),
+                    message: m,
+                })?;
+            Ok(CommandResult::ok(
+                "screenshot_clipboard",
+                "copied to clipboard",
+            ))
+        }
+        "record_start" => {
+            let path = state.recorder.start().map_err(|m| CommandError::Failed {
+                action: "record_start".into(),
+                message: m,
+            })?;
+            Ok(CommandResult::ok(
+                "record_start",
+                format!("recording → {}", path.display()),
+            ))
+        }
+        "record_stop" => match state.recorder.stop() {
+            Some(path) => Ok(CommandResult::ok(
+                "record_stop",
+                format!("saved → {}", path.display()),
+            )),
+            None => Err(CommandError::Failed {
+                action: "record_stop".into(),
+                message: "no recording in progress".into(),
+            }),
+        },
+
+        // ── Analysis ────────────────────────────────────────────────────────
+        "ocr" => {
+            let frame = state.frame_bus.latest_frame().ok_or(CommandError::NoFrame)?;
+            let text = crate::features::ocr::extract_text(&frame, None).map_err(|m| {
+                CommandError::Failed {
+                    action: "ocr".into(),
+                    message: m,
+                }
+            })?;
+            Ok(CommandResult::ok("ocr", text))
+        }
+        "ocr_clipboard" => {
+            let text = crate::features::clipboard_sync::copy_screen_text_to_clipboard(
+                &state.frame_bus,
+            )
+            .map_err(|m| CommandError::Failed {
+                action: "ocr_clipboard".into(),
+                message: m,
+            })?;
+            Ok(CommandResult::ok("ocr_clipboard", format!("copied: {text}")))
+        }
+        "ai_describe" => {
+            let frame = state.frame_bus.latest_frame().ok_or(CommandError::NoFrame)?;
+            let desc = crate::features::ai_vision::describe_screen(&frame, None).map_err(|m| {
+                CommandError::Failed {
+                    action: "ai_describe".into(),
+                    message: m,
+                }
+            })?;
+            Ok(CommandResult::ok("ai_describe", desc))
+        }
+        "qr_scan" => {
+            let frame = state.frame_bus.latest_frame().ok_or(CommandError::NoFrame)?;
+            let codes = crate::features::qr_scanner::scan_qr_codes(&frame);
+            let msg = if codes.is_empty() {
+                "no QR codes found".to_string()
+            } else {
+                codes.join(" | ")
+            };
+            Ok(CommandResult::ok("qr_scan", msg))
+        }
+
+        // ── System ──────────────────────────────────────────────────────────
+        "check_update" => {
+            match crate::system::updater::check_for_update().map_err(|m| CommandError::Failed {
+                action: "check_update".into(),
+                message: m,
+            })? {
+                Some(info) => Ok(CommandResult::ok(
+                    "check_update",
+                    format!("update available: {info:?}"),
+                )),
+                None => Ok(CommandResult::ok("check_update", "up to date")),
+            }
+        }
+        "startup_toggle" => {
+            if crate::system::startup::is_startup_enabled() {
+                crate::system::startup::disable_startup().map_err(|m| CommandError::Failed {
+                    action: "startup_toggle".into(),
+                    message: m,
+                })?;
+                Ok(CommandResult::ok("startup_toggle", "auto-start disabled"))
+            } else {
+                crate::system::startup::enable_startup().map_err(|m| CommandError::Failed {
+                    action: "startup_toggle".into(),
+                    message: m,
+                })?;
+                Ok(CommandResult::ok("startup_toggle", "auto-start enabled"))
+            }
+        }
+        "quit" => {
+            tracing::info!("quit requested via command palette");
+            std::process::exit(0);
+        }
+
+        // ── Not yet wired (Phase B: needs shared display-window state) ─────
+        "zoom_in" | "zoom_out" | "zoom_reset" | "pip_toggle" | "game_mode" | "stats_toggle"
+        | "annotation_clear" => Err(CommandError::NotDispatchable {
+            action: action_id.to_string(),
+            reason: "display-state actions are not wired yet (Phase B)",
+        }),
+
+        // ── Interactive (Phase C: needs mouse events from display) ──────────
+        "color_pick" | "annotation_rect" | "annotation_arrow" | "annotation_text" | "ruler"
+        | "privacy_add" | "privacy_clear" => Err(CommandError::NotDispatchable {
+            action: action_id.to_string(),
+            reason: "requires interactive input from the display window",
+        }),
+
+        // ── Pickers / launchers (Phase D) ───────────────────────────────────
+        "gif_save" | "translate" | "macro_run" | "lua_run" | "network_diag" | "settings"
+        | "web_dashboard" | "firewall_setup" => Err(CommandError::NotDispatchable {
+            action: action_id.to_string(),
+            reason: "needs a picker / launcher dialog (Phase D)",
+        }),
+
+        unknown => Err(CommandError::UnknownAction(unknown.to_string())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_finds_by_id_name_and_category() {
+        let by_id = search("screenshot");
+        assert!(by_id.iter().any(|c| c.id == "screenshot"));
+        let by_category = search("Capture");
+        assert!(by_category.iter().any(|c| c.category == "Capture"));
+        let by_name = search("Take Screenshot");
+        assert!(by_name.iter().any(|c| c.id == "screenshot"));
+    }
+
+    #[test]
+    fn cached_command_list_is_stable() {
+        let a = commands_cached();
+        let b = commands_cached();
+        assert!(std::ptr::eq(a, b), "OnceLock must return the same slice");
+        assert_eq!(a.len(), all_commands().len());
+    }
+
+    #[test]
+    fn unknown_action_returns_unknown_error() {
+        let bus = crate::features::FrameBus::new();
+        let state = ApiState {
+            frame_bus: bus.clone(),
+            config: std::sync::Arc::new(tokio::sync::Mutex::new(
+                crate::config::AppConfig::default(),
+            )),
+            history: std::sync::Arc::new(tokio::sync::Mutex::new(
+                crate::config::ConnectionHistory::default(),
+            )),
+            stats: std::sync::Arc::new(tokio::sync::Mutex::new(
+                crate::ui::api::StreamStats::default(),
+            )),
+            api_token: String::new(),
+            recorder: crate::features::recording::RecordingController::new(bus.clone()),
+            replay: crate::features::session_replay::SessionPlaybackController::new(bus),
+        };
+        let err = execute("not_a_real_action", &state).expect_err("should be unknown");
+        match err {
+            CommandError::UnknownAction(id) => assert_eq!(id, "not_a_real_action"),
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn not_yet_wired_actions_report_phase() {
+        let bus = crate::features::FrameBus::new();
+        let state = ApiState {
+            frame_bus: bus.clone(),
+            config: std::sync::Arc::new(tokio::sync::Mutex::new(
+                crate::config::AppConfig::default(),
+            )),
+            history: std::sync::Arc::new(tokio::sync::Mutex::new(
+                crate::config::ConnectionHistory::default(),
+            )),
+            stats: std::sync::Arc::new(tokio::sync::Mutex::new(
+                crate::ui::api::StreamStats::default(),
+            )),
+            api_token: String::new(),
+            recorder: crate::features::recording::RecordingController::new(bus.clone()),
+            replay: crate::features::session_replay::SessionPlaybackController::new(bus),
+        };
+        for id in ["zoom_in", "color_pick", "settings"] {
+            let err = execute(id, &state).expect_err("should not be dispatchable yet");
+            assert!(
+                matches!(err, CommandError::NotDispatchable { .. }),
+                "{id} should be NotDispatchable, got {err:?}"
+            );
+        }
+    }
 }

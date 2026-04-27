@@ -4,10 +4,10 @@ use crate::features::session_replay::{SessionPlaybackController, list_sessions};
 use crate::features::{FrameBus, screenshot};
 use axum::{
     Router,
-    extract::State,
+    extract::{Path, State},
     http::{Request, StatusCode},
     middleware::{self, Next},
-    response::{Json, Response},
+    response::{IntoResponse, Json, Response},
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
@@ -72,6 +72,9 @@ pub fn router(state: Arc<ApiState>) -> Router {
         // Macros
         .route("/api/macros", get(list_macros))
         .route("/api/macros/run", post(run_macro))
+        // Command palette dispatch
+        .route("/api/command/{id}", post(run_command))
+        .route("/api/commands", get(list_commands))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_bearer,
@@ -328,5 +331,141 @@ async fn run_macro(Json(req): Json<MacroRunRequest>) -> Json<serde_json::Value> 
             Json(serde_json::json!({ "status": "started", "name": req.name }))
         }
         Err(e) => Json(serde_json::json!({ "error": e })),
+    }
+}
+
+// ─── Command palette ─────────────────────────────────────────────────────────
+
+async fn list_commands() -> Json<serde_json::Value> {
+    let cmds = crate::devtools::command_palette::all_commands();
+    Json(serde_json::json!({ "commands": cmds }))
+}
+
+/// `POST /api/command/{id}` — dispatch a command palette action by id.
+///
+/// Status mapping:
+/// - 200 OK: handler ran successfully (`{ ok: true, action, message }`)
+/// - 404 Not Found: unknown action id
+/// - 409 Conflict: action recognized but not dispatchable (phase B/C/D, or
+///   recoverable failure like "no recording in progress")
+/// - 503 Service Unavailable: no frame received yet (analysis commands)
+/// - 500 Internal Server Error: handler ran but failed
+async fn run_command(
+    State(state): State<Arc<ApiState>>,
+    Path(id): Path<String>,
+) -> Response {
+    use crate::devtools::command_palette::{CommandError, execute};
+
+    // Quit short-circuits the process — log and return 202 before exit so the
+    // caller sees something. (`execute` calls `process::exit(0)` for "quit".)
+    if id == "quit" {
+        info!("quit requested via REST API");
+        // We let execute() fire — the response below is just-in-case.
+    }
+
+    match execute(&id, &state) {
+        Ok(result) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "ok": true,
+                "action": result.action,
+                "message": result.message,
+            })),
+        )
+            .into_response(),
+        Err(CommandError::UnknownAction(a)) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "ok": false,
+                "error": "unknown_action",
+                "action": a,
+            })),
+        )
+            .into_response(),
+        Err(CommandError::NotDispatchable { action, reason }) => (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "ok": false,
+                "error": "not_dispatchable",
+                "action": action,
+                "reason": reason,
+            })),
+        )
+            .into_response(),
+        Err(CommandError::NoFrame) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "ok": false,
+                "error": "no_frame",
+                "reason": "no frame available yet — connect a device first",
+            })),
+        )
+            .into_response(),
+        Err(CommandError::Failed { action, message }) => {
+            warn!(action = %action, error = %message, "command dispatch failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "error": "handler_failed",
+                    "action": action,
+                    "message": message,
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{AppConfig, ConnectionHistory};
+    use crate::features::FrameBus;
+    use crate::features::recording::RecordingController;
+    use crate::features::session_replay::SessionPlaybackController;
+
+    fn dummy_state() -> Arc<ApiState> {
+        let bus = FrameBus::new();
+        Arc::new(ApiState {
+            frame_bus: bus.clone(),
+            config: Arc::new(Mutex::new(AppConfig::default())),
+            history: Arc::new(Mutex::new(ConnectionHistory::default())),
+            stats: Arc::new(Mutex::new(StreamStats::default())),
+            api_token: String::new(),
+            recorder: RecordingController::new(bus.clone()),
+            replay: SessionPlaybackController::new(bus),
+        })
+    }
+
+    #[tokio::test]
+    async fn unknown_command_returns_404() {
+        let state = dummy_state();
+        let resp = run_command(State(state), Path("not_a_real_action".into())).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn not_dispatchable_command_returns_409() {
+        let state = dummy_state();
+        // zoom_in is intentionally Phase B — should be 409 Conflict.
+        let resp = run_command(State(state), Path("zoom_in".into())).await;
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn no_frame_command_returns_503() {
+        let state = dummy_state();
+        // 'screenshot' needs a frame; bus is empty → 503.
+        let resp = run_command(State(state), Path("screenshot".into())).await;
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn record_stop_when_idle_returns_500() {
+        let state = dummy_state();
+        // No recording in progress → handler runs, returns Failed.
+        let resp = run_command(State(state), Path("record_stop".into())).await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }
