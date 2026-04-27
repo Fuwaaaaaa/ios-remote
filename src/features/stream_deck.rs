@@ -131,3 +131,92 @@ pub fn try_open_device() -> Result<elgato_streamdeck::StreamDeck, String> {
     StreamDeck::connect(&hid, kind, &serial)
         .map_err(|e| format!("connect to Stream Deck {serial}: {e}"))
 }
+
+// ─── Event loop ──────────────────────────────────────────────────────────────
+//
+// Reads HID input from the connected Stream Deck and dispatches each press
+// (edge: not-pressed → pressed) through the command palette using the shared
+// `ApiState`. Each handler runs on a fresh OS thread so a slow command
+// (e.g. `ai_describe` calling out to an LLM) doesn't block subsequent button
+// reads. Released → not-pressed transitions are ignored — buttons fire on
+// press, the standard HID convention.
+//
+// Without `--features stream_deck`, this is a no-op stub so callers don't
+// need their own cfg guards.
+
+use crate::ui::api::ApiState;
+use std::sync::Arc;
+
+#[cfg(not(feature = "stream_deck"))]
+pub fn run_event_loop(_integration: StreamDeckIntegration, _state: Arc<ApiState>) {
+    // feature disabled — caller's spawn becomes a no-op thread.
+}
+
+#[cfg(feature = "stream_deck")]
+pub fn run_event_loop(integration: StreamDeckIntegration, state: Arc<ApiState>) {
+    use elgato_streamdeck::StreamDeckInput;
+    use std::time::Duration;
+
+    let device = match try_open_device() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!(error = %e, "Stream Deck not available — HID loop exiting");
+            return;
+        }
+    };
+    tracing::info!(
+        buttons = integration.buttons().len(),
+        "Stream Deck connected — HID loop running"
+    );
+
+    // Track previous button state to detect rising edges (press events).
+    // Sized lazily on first ButtonStateChange so we adapt to whatever the
+    // attached device reports (XL = 32, MK.2 = 15, Mini = 6, …).
+    let mut prev: Vec<bool> = Vec::new();
+
+    loop {
+        match device.read_input(Some(Duration::from_millis(500))) {
+            Ok(StreamDeckInput::NoData) => continue,
+            Ok(StreamDeckInput::ButtonStateChange(buttons)) => {
+                if prev.len() != buttons.len() {
+                    prev.resize(buttons.len(), false);
+                }
+                for (i, &down) in buttons.iter().enumerate() {
+                    let was_down = prev[i];
+                    if down
+                        && !was_down
+                        && let Some(action) = integration.on_press(i as u8)
+                    {
+                        let action = action.to_string();
+                        let state = state.clone();
+                        // Off-thread so a slow handler doesn't backpressure
+                        // the HID read loop.
+                        std::thread::spawn(move || {
+                            match crate::devtools::command_palette::execute(&action, &state) {
+                                Ok(r) => tracing::info!(
+                                    action = %r.action,
+                                    message = %r.message,
+                                    "stream deck press"
+                                ),
+                                Err(e) => tracing::warn!(
+                                    action = %action,
+                                    error = %e,
+                                    "stream deck press failed"
+                                ),
+                            }
+                        });
+                    }
+                }
+                prev.copy_from_slice(&buttons);
+            }
+            // Encoder / touch-screen input is unused for now (no Stream Deck +
+            // / Plus in scope). Drop these silently; the read keeps the loop
+            // alive.
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!(error = %e, "Stream Deck read error — HID loop exiting");
+                return;
+            }
+        }
+    }
+}
