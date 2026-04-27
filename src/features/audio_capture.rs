@@ -327,14 +327,31 @@ pub fn spawn_transcription_pump(
 
                     while buffer.len() >= target_samples {
                         let take: Vec<f32> = buffer.drain(..target_samples).collect();
-                        let mut t = transcriber.lock().unwrap_or_else(|p| p.into_inner());
-                        let ts_ms = t.now_ms();
-                        match t.transcribe_pcm(&take, ts_ms) {
-                            Ok(text) if !text.is_empty() => {
-                                info!(text = %text, "transcribed chunk")
+                        // Capture the timestamp under a tiny lock so the
+                        // pump never holds the Mutex across the heavy
+                        // inference call. The display loop and /api/*
+                        // handlers also lock this Mutex, so a multi-second
+                        // hold here would freeze the UI.
+                        let ts_ms = {
+                            let t = transcriber.lock().unwrap_or_else(|p| p.into_inner());
+                            t.now_ms()
+                        };
+                        let openai_key = std::env::var("OPENAI_API_KEY").ok();
+                        let result = tokio::task::spawn_blocking(move || {
+                            super::audio_transcription::transcribe_blocking(&take, openai_key)
+                        })
+                        .await;
+                        match result {
+                            Ok(Ok(text)) if !text.is_empty() => {
+                                let mut t = transcriber.lock().unwrap_or_else(|p| p.into_inner());
+                                t.add_subtitle(&text, ts_ms);
+                                info!(text = %text, "transcribed chunk");
                             }
-                            Ok(_) => {}
-                            Err(e) => warn!(error = %e, "transcribe failed"),
+                            Ok(Ok(_)) => {}
+                            Ok(Err(e)) => warn!(error = %e, "transcribe failed"),
+                            Err(e) => {
+                                warn!(error = %e, "transcribe blocking task panicked");
+                            }
                         }
                     }
                 }
