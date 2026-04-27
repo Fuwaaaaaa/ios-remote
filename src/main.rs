@@ -156,27 +156,27 @@ async fn main() -> anyhow::Result<()> {
     // ── Session replay controller (shared with the REST API) ────────────────
     let replay = features::session_replay::SessionPlaybackController::new(frame_bus.clone());
 
+    // ── Shared API state ────────────────────────────────────────────────────
+    // Built up-front (before the web spawn) so the Stream Deck HID thread
+    // can also dispatch through it.
+    let api_state = std::sync::Arc::new(ui::api::ApiState {
+        frame_bus: frame_bus.clone(),
+        config: std::sync::Arc::new(tokio::sync::Mutex::new(app_config.clone())),
+        history: std::sync::Arc::new(tokio::sync::Mutex::new(
+            config::ConnectionHistory::default(),
+        )),
+        stats: std::sync::Arc::new(tokio::sync::Mutex::new(ui::api::StreamStats::default())),
+        api_token: api_token.clone(),
+        recorder: recorder.clone(),
+        replay: replay.clone(),
+    });
+
     // ── Web dashboard ───────────────────────────────────────────────────────
-    let web_bus = frame_bus.clone();
-    let web_token = api_token.clone();
-    let web_config = app_config.clone();
-    let web_recorder = recorder.clone();
-    let web_replay = replay.clone();
+    let web_state = api_state.clone();
     tokio::spawn(async move {
-        let api_state = std::sync::Arc::new(ui::api::ApiState {
-            frame_bus: web_bus,
-            config: std::sync::Arc::new(tokio::sync::Mutex::new(web_config)),
-            history: std::sync::Arc::new(tokio::sync::Mutex::new(
-                config::ConnectionHistory::default(),
-            )),
-            stats: std::sync::Arc::new(tokio::sync::Mutex::new(ui::api::StreamStats::default())),
-            api_token: web_token,
-            recorder: web_recorder,
-            replay: web_replay,
-        });
-        let app = ui::api::router(api_state.clone()).route(
+        let app = ui::api::router(web_state.clone()).route(
             "/",
-            axum::routing::get(ui::web::dashboard).with_state(api_state),
+            axum::routing::get(ui::web::dashboard).with_state(web_state),
         );
         match tokio::net::TcpListener::bind(web_addr).await {
             Ok(listener) => {
@@ -194,6 +194,18 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     });
+
+    // ── Stream Deck HID loop (only when --features stream_deck is on) ───────
+    #[cfg(feature = "stream_deck")]
+    {
+        let sd_state = api_state.clone();
+        std::thread::spawn(move || {
+            let integration = features::stream_deck::StreamDeckIntegration::new();
+            features::stream_deck::run_event_loop(integration, sd_state);
+        });
+    }
+    #[cfg(not(feature = "stream_deck"))]
+    let _ = &api_state; // silence the "only used when feature is on" lint
 
     // ── USB connection (main task) ──────────────────────────────────────────
     let receiver = usb::UsbReceiver::new(frame_bus).with_udid(cli.device.clone());
