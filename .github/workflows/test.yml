@@ -62,6 +62,7 @@ jobs:
           key: whisper
 
       - name: Install LLVM (for whisper-rs-sys / bindgen)
+        id: install-llvm
         uses: KyleMayes/install-llvm-action@v2
         with:
           version: "17"
@@ -69,7 +70,11 @@ jobs:
       - name: Build with whisper feature
         run: cargo build --locked --features whisper
         env:
-          LIBCLANG_PATH: ${{ env.LLVM_PATH }}\bin
+          # Forward slashes are portable across pwsh/bash/cmd on Windows
+          # runners; backslashes break in bash steps. The action exports
+          # LLVM_PATH; bindgen / whisper-rs-sys read LIBCLANG_PATH for
+          # the directory containing libclang.dll.
+          LIBCLANG_PATH: ${{ env.LLVM_PATH }}/bin
 
   audit:
     name: cargo audit (advisory scan)

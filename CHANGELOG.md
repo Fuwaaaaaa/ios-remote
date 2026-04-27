@@ -4,37 +4,66 @@ All notable changes to this project are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.7.0] — 2026-04-27
+
+The v0.7 theme is **the audio pipeline**. We landed the missing capture
+source so the existing transcription / subtitle / overlay code finally
+has something to consume — and fixed two correctness bugs surfaced by
+post-merge review (lock contention during inference, model reload per
+chunk) before the feature went anywhere near a tag.
 
 ### Added
 - **WASAPI loopback audio capture + Whisper subtitles end-to-end** —
   `src/features/audio_capture.rs` introduces an `AudioBus` /
   `AudioCapture::spawn` pair that opens the default Windows output device
-  in WASAPI loopback mode via `cpal`, with mic fallback. A transcription
-  pump down-mixes to mono, resamples to 16 kHz, and feeds 5-second windows
-  into `Transcriber::transcribe_pcm` (new). Local whisper.cpp consumes the
-  f32 buffer directly; the OpenAI HTTP path keeps working for non-`whisper`
-  builds. The display loop renders the live subtitle bar using a richer
-  5x7 bitmap font (full A–Z, a–z, common punctuation) shared with the
-  stats overlay. New routes `GET /api/audio/status` and
-  `GET /api/subtitles` expose state to the dashboard. Configurable via the
-  new `[audio]` block in `ios-remote.toml` (`source`, `chunk_secs`,
-  `language`).
+  in WASAPI loopback mode via `cpal`, with mic fallback when no output
+  device is available. A transcription pump down-mixes to mono, resamples
+  to 16 kHz, and feeds 5-second windows into `transcribe_blocking` on
+  `tokio::task::spawn_blocking`. Local whisper.cpp consumes the f32 buffer
+  directly; the OpenAI HTTP path keeps working for non-`whisper` builds.
+  The display loop renders the live subtitle bar using a richer 5x7
+  bitmap font (full A–Z, a–z, common punctuation) shared with the stats
+  overlay. New routes `GET /api/audio/status` and `GET /api/subtitles`
+  expose state to the dashboard. Configurable via the new `[audio]` block
+  in `ios-remote.toml` (`source`, `chunk_secs`, `language`).
 - **`audio_capture` feature flag** — gates the cpal dep so default builds
   stay slim; `whisper` now implies `audio_capture` so the end-to-end
   pipeline is reachable.
-- **CI: `whisper` build job** — Windows runner with LLVM/libclang installed
-  builds `--features whisper` so whisper-rs-sys cannot bitrot silently.
+- **CI: `whisper` build job** — Windows runner with LLVM 17 installed
+  builds `--features whisper`, with `LIBCLANG_PATH` wired explicitly for
+  whisper-rs-sys / bindgen. Closes the v0.6 roadmap blocker that gated
+  whisper work on bitrot risk.
+- **Whisper context cache** — process-global `OnceLock<Option<Arc<_>>>`
+  loads the ~140 MB ggml model exactly once. A `None` entry records
+  prior init failure so we don't retry on every chunk.
 
 ### Changed
 - `Transcriber` exposes `now_ms()` so the capture pump and display loop
   share a single monotonic clock for subtitle timestamps and visibility
   windows.
 - WAV byte layout extracted to `audio_viz::pcm16_to_wav_bytes` /
-  `f32_to_wav_bytes` and reused by both `AudioRecorder::save_wav` and the
-  OpenAI transcription fallback.
+  `f32_to_wav_bytes` and reused by the OpenAI transcription fallback.
 - `run_display` now accepts `Option<Arc<Mutex<Transcriber>>>`. `None` =
   no-op (default builds).
+- Unknown `audio.source` strings now warn at startup instead of silently
+  disabling capture — typo'd values land in the log instead of looking
+  like a feature regression.
+
+### Fixed
+- **Pump no longer holds `Mutex<Transcriber>` across whisper inference.**
+  Pre-fix, every chunk locked the transcriber for the entire ~200ms–
+  several-second duration of `state.full(...)` (or curl HTTP). Display
+  thread + `/api/*` handlers also lock that mutex, so the UI froze and
+  the API stalled with each chunk. Inference now runs on
+  `spawn_blocking` with the lock released; the pump only re-locks for
+  microseconds to read `now_ms()` and call `add_subtitle`.
+- **OpenAI fallback temp file is now per-pid** (`ios_remote_audio_<pid>.wav`)
+  so concurrent ios-remote instances don't trample each other's
+  uploads.
+
+## [Unreleased]
+
+_(no entries yet)_
 
 ## [0.6.0] — 2026-04-27
 

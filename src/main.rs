@@ -161,8 +161,17 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(feature = "audio_capture")]
     let (transcriber, _audio_handle) = {
         use features::audio_capture::{AudioBus, AudioCapture, AudioSource};
-        let configured = features::audio_capture::AudioSource::parse(&app_config.audio.source)
-            .unwrap_or(AudioSource::Off);
+        let configured = match features::audio_capture::AudioSource::parse(&app_config.audio.source)
+        {
+            Some(src) => src,
+            None => {
+                tracing::warn!(
+                    raw = %app_config.audio.source,
+                    "Unknown audio.source value (expected loopback / mic / off); disabling audio capture"
+                );
+                AudioSource::Off
+            }
+        };
         if configured == AudioSource::Off {
             tracing::info!("Audio capture: disabled by config");
             (

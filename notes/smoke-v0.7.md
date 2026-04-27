@@ -1,7 +1,8 @@
-# Smoke Test — v0.7 prep (WASAPI loopback + Whisper subtitles)
+# Smoke Test — v0.7.0 (WASAPI loopback + Whisper subtitles)
 
 **Date:** 2026-04-27
-**Branch:** master (post-v0.6.0)
+**Branch / tag:** master, tagged `v0.7.0`
+**Commits in this release:** `9fef97a` (feat) → `875a88d` (fix) → release prep
 **Tester:** agent-driven build smoke (no iPhone, no audio playback)
 
 This is the agent-runnable record for the v0.7 headline (WASAPI loopback
@@ -23,49 +24,103 @@ microphone and an iPhone for the full mirror experience.
 
 ## Agent-run scenarios (no hardware required)
 
-### S1. Default build still green
+### ✅ S1. Default build still green
 
 ```
-cargo check
+$ cargo build --locked
+   Compiling ios-remote v0.7.0 (C:\project\test\ios-remote)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.15s
 ```
 
-Expected: clean — cpal + cpal-platform deps must NOT be pulled in.
+cpal / cpal-platform are NOT pulled into the dependency graph — confirmed
+by `cargo tree -e features` (no cpal node when feature is off).
 
-### S2. `audio_capture` build green
-
-```
-cargo check --features audio_capture
-```
-
-Expected: cpal compiles; ios-remote links; no warnings beyond existing
-ones.
-
-### S3. Tests for the new bits
+### ✅ S2. `audio_capture` build green
 
 ```
-cargo test --features audio_capture audio_
+$ cargo build --locked --features audio_capture
+   Compiling ios-remote v0.7.0 (C:\project\test\ios-remote)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.02s
 ```
 
-Covers: `wrap_two_lines`, `add_subtitle_drops_oldest_past_cap`,
-`audio_source_parse_roundtrip`, `audio_bus_broadcasts`.
+Pulls in `cpal 0.15.3`, `windows 0.54.0`, `dasp_sample 0.11.0` (cpal
+transitive). No new warnings.
 
-### S4. Existing feature-set builds unchanged
+### ✅ S3. Tests pass
 
 ```
-cargo check --features lua
-cargo check --features stream_deck
-cargo check --features experimental
+$ cargo test
+test result: ok. 49 passed; 0 failed; 2 ignored; ...
+test result: ok. 8 passed; 0 failed; 0 ignored; ...
+
+$ cargo test --features audio_capture
+test result: ok. 51 passed; 0 failed; 2 ignored; ...
+test result: ok. 8 passed; 0 failed; 0 ignored; ...
 ```
 
-Expected: all green. v0.7 work is additive.
+The 2 new tests under `--features audio_capture` are
+`audio_source_parse_roundtrip` and `audio_bus_broadcasts`. The 5 new
+tests under `audio_transcription::tests` (wrap, add_subtitle cap) run
+in both configurations.
 
-### S5. `whisper` build (CI job, not run locally)
+### ✅ S4. Existing feature builds unchanged
+
+```
+$ cargo build --locked --features lua          # 14.66s
+$ cargo build --locked --features stream_deck  # 14.31s
+$ cargo build --locked --features experimental # 17.45s
+```
+
+v0.7 work is purely additive. No warnings introduced.
+
+### ✅ S5. Clippy hard gate (-D warnings)
+
+```
+$ cargo clippy --all-targets -- -D warnings
+$ cargo clippy --all-targets --features audio_capture -- -D warnings
+```
+
+Both green.
+
+### ✅ S6. cargo audit
+
+```
+$ cargo audit --deny warnings
+Loaded 1058 security advisories (from .../advisory-db)
+Scanning Cargo.lock for vulnerabilities (402 crate dependencies)
+EXIT=0
+```
+
+The two pre-existing triages (`RUSTSEC-2024-0384` minifb→instant,
+`RUSTSEC-2024-0436` image→ravif→paste) remain ignored per
+`.cargo/audit.toml`. No new advisories surfaced from the cpal
+sub-graph.
+
+### ⏳ S7. `whisper` build — deferred to CI
 
 The `whisper:` job in `.github/workflows/test.yml` installs LLVM 17 and
-runs `cargo build --features whisper`. Locally this requires `LIBCLANG_PATH`
-to be set; deferred to CI in this run.
+runs `cargo build --features whisper`. Local agent run does not have
+LLVM/libclang in PATH; deferred to GitHub Actions for the v0.7.0 tag.
 
 ---
+
+## Lock contention regression (v0.7 review fix)
+
+Post-merge review of the v0.7 audio pipeline surfaced two issues that
+were fixed in `875a88d` before tag:
+
+1. The pump locked `Mutex<Transcriber>` across the entire whisper /
+   curl call — display thread (60 fps) and `/api/audio/*` handlers
+   would block with each chunk. Fixed by running `transcribe_blocking`
+   on `tokio::task::spawn_blocking` with the lock released, and
+   re-locking only for the microsecond-tier `now_ms()` and
+   `add_subtitle()` calls.
+2. `WhisperContext` was rebuilt every chunk (~140 MB ggml reload from
+   disk). Fixed by caching it in a process-global
+   `OnceLock<Option<Arc<_>>>` — first call loads, subsequent calls
+   clone the Arc.
+
+The S* scenarios above all run on the post-fix tree.
 
 ## H — Human / hardware scenarios (deferred)
 
