@@ -4,6 +4,42 @@ All notable changes to this project are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [0.7.1] — 2026-04-27
+
+Post-release security + correctness audit on v0.7.0. No new features;
+no behavior change for users beyond the log line and subtitle window.
+
+### Security
+- **API Bearer token no longer printed verbatim at startup.** The
+  `info` log now shows a masked form (`head…tail`); the full token is
+  only emitted at `debug` level. Captured stdout / log files no longer
+  leak the token, which is critical when the dashboard is exposed via
+  `--lan`.
+- **`OPENAI_API_KEY` no longer passed on the curl command line.** The
+  OpenAI transcription fallback now feeds curl a `-K -` config via
+  stdin, so `Authorization: Bearer …` never appears in the process
+  command line (visible to other local users on Windows via
+  `tasklist /v` / WMI / Process Explorer). Values are escaped per
+  `curl(1)`.
+- **Per-pid temp WAV is removed after each transcription call.**
+  Captured audio used to linger in `%TEMP%`; it is now deleted on both
+  success and failure paths. Set `IOS_REMOTE_KEEP_AUDIO_TMP=1` to
+  retain it for debugging.
+
+### Fixed
+- **Resampler stall guard.** `current_rate.max(1)` clamp in the
+  transcription pump so a (theoretical) zero sample rate from a
+  misbehaving cpal backend can't stall the loop.
+- **Subtitle visibility window honors `chunk_secs`.** Previously fixed
+  at 3 s, which blanked out before the next 5–10 s chunk arrived. Now
+  uses `chunk_secs * 1000`, floored at 3 s.
+
+### Tests
+- +5 unit tests: `mask_token` head/tail behavior, `escape_curl_config_value`
+  escaping rules, subtitle duration floor + honor. Full suite:
+  62 passed, 0 failed. `cargo clippy --all-targets -- -D warnings`
+  clean for both the default and `audio_capture` feature builds.
+
 ## [0.7.0] — 2026-04-27
 
 The v0.7 theme is **the audio pipeline**. We landed the missing capture
