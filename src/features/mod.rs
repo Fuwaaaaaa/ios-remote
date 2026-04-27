@@ -20,6 +20,7 @@ pub mod h264_encoder;
 pub mod heatmap;
 pub mod i18n;
 pub mod imgur_share;
+pub mod iproxy_supervisor;
 pub mod keyboard_input;
 pub mod macros;
 pub mod notification_capture;
