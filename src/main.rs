@@ -131,13 +131,6 @@ async fn main() -> anyhow::Result<()> {
     // ── Frame bus: decoded frames broadcast to all consumers ────────────────
     let frame_bus = FrameBus::new();
 
-    // ── Display window (OS thread) ──────────────────────────────────────────
-    let display_bus = frame_bus.clone();
-    let pip = cli.pip;
-    let display_handle = std::thread::spawn(move || {
-        features::display::run_display(display_bus.subscribe(), pip);
-    });
-
     // ── H.264 encoder (RGBA → H.264 on the fly; feeds recording / replay /
     //    RTMP with populated `Frame.h264_nalu`). No-op if ffmpeg is missing.
     features::h264_encoder::H264Encoder::new(frame_bus.clone()).spawn();
@@ -155,6 +148,22 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Session replay controller (shared with the REST API) ────────────────
     let replay = features::session_replay::SessionPlaybackController::new(frame_bus.clone());
+
+    // ── Display window (OS thread) ──────────────────────────────────────────
+    // Spawned after recorder/replay exist so the title bar's activity
+    // indicator can read their state on every frame.
+    let display_bus = frame_bus.clone();
+    let display_recorder = recorder.clone();
+    let display_replay = replay.clone();
+    let pip = cli.pip;
+    let display_handle = std::thread::spawn(move || {
+        features::display::run_display(
+            display_bus.subscribe(),
+            pip,
+            display_recorder,
+            display_replay,
+        );
+    });
 
     // ── Shared API state ────────────────────────────────────────────────────
     // Built up-front (before the web spawn) so the Stream Deck HID thread

@@ -1,3 +1,5 @@
+use crate::features::recording::RecordingController;
+use crate::features::session_replay::SessionPlaybackController;
 use crate::features::{Frame, screenshot};
 use minifb::{Key, Window, WindowOptions};
 use std::sync::Arc;
@@ -9,8 +11,16 @@ use tracing::info;
 /// Features:
 ///   - Aspect-ratio-preserving letterbox
 ///   - Always-on-top (PiP mode)
+///   - Activity indicator: title bar prefix shows ● REC / ▶ REPLAY when
+///     either lifecycle is active so users have visible feedback for
+///     state mutated via REST or Stream Deck
 ///   - Hotkeys: S = screenshot, F = fullscreen toggle, Q/Esc = quit
-pub fn run_display(mut frame_rx: broadcast::Receiver<Arc<Frame>>, pip_mode: bool) {
+pub fn run_display(
+    mut frame_rx: broadcast::Receiver<Arc<Frame>>,
+    pip_mode: bool,
+    recorder: RecordingController,
+    replay: SessionPlaybackController,
+) {
     let init_w = 960;
     let init_h = 540;
 
@@ -21,13 +31,8 @@ pub fn run_display(mut frame_rx: broadcast::Receiver<Arc<Frame>>, pip_mode: bool
         ..WindowOptions::default()
     };
 
-    let title = if pip_mode {
-        "ios-remote [PiP]"
-    } else {
-        "ios-remote — USB Mirror"
-    };
-
-    let mut window = match Window::new(title, init_w, init_h, opts) {
+    let mut last_title = compose_title(pip_mode, false, false);
+    let mut window = match Window::new(&last_title, init_w, init_h, opts) {
         Ok(w) => w,
         Err(e) => {
             tracing::error!(error = %e, "Failed to create window");
@@ -67,6 +72,14 @@ pub fn run_display(mut frame_rx: broadcast::Receiver<Arc<Frame>>, pip_mode: bool
             }
         }
 
+        // Activity indicator: refresh the title only when the state flips so
+        // we're not allocating + Win32-call'ing every frame.
+        let next_title = compose_title(pip_mode, recorder.is_active(), replay.is_active());
+        if next_title != last_title {
+            window.set_title(&next_title);
+            last_title = next_title;
+        }
+
         window
             .update_with_buffer(&buffer, width, height)
             .unwrap_or_else(|e| {
@@ -75,6 +88,62 @@ pub fn run_display(mut frame_rx: broadcast::Receiver<Arc<Frame>>, pip_mode: bool
     }
 
     info!("Display window closed");
+}
+
+fn compose_title(pip: bool, recording: bool, replaying: bool) -> String {
+    let mut parts: Vec<&str> = Vec::with_capacity(3);
+    if recording {
+        parts.push("● REC");
+    }
+    if replaying {
+        parts.push("▶ REPLAY");
+    }
+    if pip {
+        parts.push("[PiP]");
+    }
+    if parts.is_empty() {
+        "ios-remote — USB Mirror".to_string()
+    } else {
+        format!("ios-remote — {}", parts.join(" · "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn idle_title_has_no_indicator() {
+        assert_eq!(compose_title(false, false, false), "ios-remote — USB Mirror");
+    }
+
+    #[test]
+    fn pip_only_shows_marker() {
+        assert_eq!(compose_title(true, false, false), "ios-remote — [PiP]");
+    }
+
+    #[test]
+    fn recording_indicator_overrides_idle_title() {
+        let t = compose_title(false, true, false);
+        assert!(t.contains("● REC"), "got: {t}");
+    }
+
+    #[test]
+    fn replay_indicator_overrides_idle_title() {
+        let t = compose_title(false, false, true);
+        assert!(t.contains("▶ REPLAY"), "got: {t}");
+    }
+
+    #[test]
+    fn all_three_states_concatenate_in_order() {
+        let t = compose_title(true, true, true);
+        // recording first, then replay, then PiP.
+        let rec_pos = t.find("● REC").expect("missing rec");
+        let rep_pos = t.find("▶ REPLAY").expect("missing replay");
+        let pip_pos = t.find("[PiP]").expect("missing pip");
+        assert!(rec_pos < rep_pos);
+        assert!(rep_pos < pip_pos);
+    }
 }
 
 /// Convert RGBA [u8] to RGB32 [u32] for minifb (0x00RRGGBB).
