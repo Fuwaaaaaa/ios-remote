@@ -461,8 +461,8 @@ mod tests {
     #[tokio::test]
     async fn not_dispatchable_command_returns_409() {
         let state = dummy_state();
-        // color_pick is Phase C (needs mouse events) — still 409 Conflict.
-        let resp = run_command(State(state), Path("color_pick".into())).await;
+        // ruler still 409 — Phase C only wired color_pick so far.
+        let resp = run_command(State(state), Path("ruler".into())).await;
         assert_eq!(resp.status(), StatusCode::CONFLICT);
     }
 

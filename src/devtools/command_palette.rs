@@ -469,11 +469,20 @@ pub fn execute(action_id: &str, state: &ApiState) -> Result<CommandResult, Comma
             reason: "minifb topmost is set at window creation; runtime toggle requires a Win32 SetWindowPos hack — separate PR",
         }),
 
-        // ── Interactive (Phase C: needs mouse events from display) ──────────
-        "color_pick" | "annotation_rect" | "annotation_arrow" | "annotation_text" | "ruler"
-        | "privacy_add" | "privacy_clear" => Err(CommandError::NotDispatchable {
+        // ── Interactive (Phase C) ───────────────────────────────────────────
+        "color_pick" => with_display(state, |d| {
+            d.last_picked = None;
+            d.pending = crate::features::display_state::PendingInteractive::ColorPick;
+            Ok("click in the display window to pick a color".into())
+        })
+        .map(|m| CommandResult::ok("color_pick", m)),
+        // The rest of Phase C still 409s — annotation_rect/arrow/text need
+        // multi-click state machines, ruler is two-click, privacy_add takes
+        // a region, privacy_clear has no host fn yet.
+        "annotation_rect" | "annotation_arrow" | "annotation_text" | "ruler" | "privacy_add"
+        | "privacy_clear" => Err(CommandError::NotDispatchable {
             action: action_id.to_string(),
-            reason: "requires interactive input from the display window",
+            reason: "Phase C in progress: only color_pick dispatched so far",
         }),
 
         // ── Launchers (Phase D, no-arg) ─────────────────────────────────────
@@ -638,15 +647,31 @@ mod tests {
     fn pip_toggle_and_phase_c_actions_still_report_not_dispatchable() {
         let state = dummy_state();
         // pip_toggle still 409 (minifb topmost runtime toggle is a separate
-        // PR). color_pick is Phase C (needs mouse events). macro_run needs
+        // PR). ruler is the rest of Phase C (multi-click). macro_run needs
         // arguments. All three exercise distinct NotDispatchable reasons.
-        for id in ["pip_toggle", "color_pick", "macro_run"] {
+        for id in ["pip_toggle", "ruler", "macro_run"] {
             let err = execute(id, &state).expect_err("should not be dispatchable yet");
             assert!(
                 matches!(err, CommandError::NotDispatchable { .. }),
                 "{id} should be NotDispatchable, got {err:?}"
             );
         }
+    }
+
+    #[test]
+    fn color_pick_arms_pending_state() {
+        let state = dummy_state();
+        let r = execute("color_pick", &state).expect("color_pick should arm");
+        assert_eq!(r.action, "color_pick");
+        let guard = state.display.lock().unwrap();
+        assert_eq!(
+            guard.pending,
+            crate::features::display_state::PendingInteractive::ColorPick
+        );
+        assert!(
+            guard.last_picked.is_none(),
+            "previous pick should be cleared"
+        );
     }
 
     #[test]
