@@ -4,7 +4,13 @@ All notable changes to this project are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.6.0] — 2026-04-27
+
+The big v0.6 theme is **dispatch unification** — REST, Stream Deck, and
+hotkeys all flow through a single `command_palette::execute` surface.
+**23 of 35 Command Palette actions** dispatch live; the rest return a
+structured `409 not_dispatchable` with a clear "phase" reason so the
+gaps are honest and easy to plan against.
 
 ### Added
 - **Live H.264 encoder** — `H264Encoder` subscribes to the shared `FrameBus`,
@@ -26,6 +32,70 @@ project uses [Semantic Versioning](https://semver.org/).
   pause / seek controls, and bookmark shortcuts. ffmpeg stays an optional
   runtime dependency (seam added via `with_ffmpeg_bin` for testability).
   Seeking while playing is rejected — callers pause, seek, then resume.
+- **Command Palette dispatch** — `command_palette::execute(action_id, &ApiState)`
+  is the single dispatch surface for the 35 Command Palette actions. Wired
+  this release: screenshot, screenshot_clipboard, record_start, record_stop,
+  ocr, ocr_clipboard, ai_describe, qr_scan, check_update, startup_toggle,
+  quit, web_dashboard, settings, firewall_setup, translate, zoom_in,
+  zoom_out, zoom_reset, game_mode, stats_toggle, annotation_clear,
+  color_pick. Returns `CommandError` with a phase tag for the rest.
+- **REST `POST /api/command/{id}` + `GET /api/commands`** — Bearer-protected;
+  status mapping is 200 success / 404 unknown / 409 not dispatchable / 503 no
+  frame / 500 handler failed. Used by the Web Dashboard and any external
+  client that wants the same surface as Stream Deck.
+- **Stream Deck HID event loop** (`--features stream_deck`) — opens the
+  first attached device, edge-detects rising-edge presses, dispatches each
+  through `command_palette::execute` on a fresh OS thread (no HID-loop
+  backpressure from slow handlers like `ai_describe`).
+- **Activity indicator** — display window title shows `● REC` / `▶ REPLAY` /
+  `[PiP]` when the corresponding lifecycle is active. Title is only re-set
+  when the composed string changes — no per-frame Win32 churn.
+- **Shared display state** — new `features::display_state::DisplayState`
+  collects zoom + game mode + annotations + stats visibility +
+  PendingInteractive under one `Arc<std::sync::Mutex<…>>` shared by the
+  display thread, REST, and Stream Deck. Source frame dimensions are
+  pushed into ZoomState every frame so dispatch-driven zoom works without
+  knowing the device geometry.
+- **`color_pick` interactive flow** — dispatch arms `pending = ColorPick`;
+  the display loop's mouse handler completes the action on the next
+  left-click rising edge, translating buffer-space coords back to source
+  coords (zoom-offset compensated), and stores the picked color (hex /
+  rgb / hsl) in `DisplayState.last_picked`.
+- **`iproxy` auto-spawn** — startup probes `127.0.0.1:8100`; if nothing's
+  listening, spawns `iproxy 8100 8100 -u <UDID>` so WDA macros work
+  without manual tunneling. Failure modes (port bound, iproxy not on
+  PATH, spawn error) all log + continue — never fatal.
+- **CI: whisper build job + cargo-deny pass** — a Windows + LLVM 17 job
+  runs `cargo build --features whisper` on every PR (closes whisper-rs-sys
+  bitrot risk). A separate soft-fail `cargo deny` job covers licenses,
+  banned crates, and source drift; new `deny.toml` declares the
+  permissive license set we ship under.
+
+### Changed
+- **`command_palette::search`** — replaced per-call `Box::leak` with
+  `OnceLock<Vec<Command>>` (was leaking ~3 KB per invocation; trivial in
+  practice but uncapped over a long session).
+- **`run_display`** — now takes `RecordingController`, `SessionPlaybackController`,
+  and `Arc<Mutex<DisplayState>>` so the title bar's activity indicator and
+  the zoom transform / pending-action handler can read state every frame.
+- **README** — adds a Command Palette dispatch section documenting the
+  REST status codes and the 23/35 action count, plus Stream Deck and
+  Activity Indicator subsections.
+
+### Deferred to a follow-up
+- **WASAPI loopback for Whisper** — the capture side (transcribe_chunk)
+  was wired in v0.5, but live system-audio capture stayed out of v0.6 to
+  keep the COM init / resampling path on a hardware-verified review.
+  Tracked in `docs/ROADMAP-v0.6.md`.
+- **Phase C remainder** — annotation_rect/arrow/text, ruler, privacy_add,
+  privacy_clear are multi-click state machines; this release lays the
+  PendingInteractive groundwork (color_pick) and stops there.
+- **`pip_toggle` runtime flip** — minifb sets `topmost` at window
+  creation; runtime flipping needs a Win32 `SetWindowPos` hack against
+  the display window HWND, scoped to a separate PR.
+- **Picker-required commands** — `macro_run`, `lua_run`, `network_diag`,
+  `gif_save` need caller-supplied arguments; they wait for an
+  `execute(action, args, state)` signature bump.
 
 ## [0.5.0] — 2026-04-21
 
