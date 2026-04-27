@@ -434,20 +434,114 @@ pub fn execute(action_id: &str, state: &ApiState) -> Result<CommandResult, Comma
             reason: "requires interactive input from the display window",
         }),
 
-        // ── Pickers / launchers (Phase D) ───────────────────────────────────
-        "gif_save" | "translate" | "macro_run" | "lua_run" | "network_diag" | "settings"
-        | "web_dashboard" | "firewall_setup" => Err(CommandError::NotDispatchable {
-            action: action_id.to_string(),
-            reason: "needs a picker / launcher dialog (Phase D)",
-        }),
+        // ── Launchers (Phase D, no-arg) ─────────────────────────────────────
+        "web_dashboard" => {
+            launch_url(&state.dashboard_url).map_err(|m| CommandError::Failed {
+                action: "web_dashboard".into(),
+                message: m,
+            })?;
+            Ok(CommandResult::ok(
+                "web_dashboard",
+                format!("opened {}", state.dashboard_url),
+            ))
+        }
+        "settings" => {
+            launch_path("ios-remote.toml").map_err(|m| CommandError::Failed {
+                action: "settings".into(),
+                message: m,
+            })?;
+            Ok(CommandResult::ok("settings", "opened ios-remote.toml"))
+        }
+        "firewall_setup" => {
+            launch_path("wf.msc").map_err(|m| CommandError::Failed {
+                action: "firewall_setup".into(),
+                message: m,
+            })?;
+            Ok(CommandResult::ok(
+                "firewall_setup",
+                "Windows Firewall console opened",
+            ))
+        }
+        "translate" => {
+            let frame = state.frame_bus.latest_frame().ok_or(CommandError::NoFrame)?;
+            let mut overlay = crate::features::translation::TranslationOverlay::new("en", "ja");
+            let pairs = overlay
+                .translate_frame(&frame)
+                .map_err(|m| CommandError::Failed {
+                    action: "translate".into(),
+                    message: m,
+                })?;
+            let summary = if pairs.is_empty() {
+                "no text detected".to_string()
+            } else {
+                pairs
+                    .into_iter()
+                    .map(|(orig, trans)| format!("{orig} → {trans}"))
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            };
+            Ok(CommandResult::ok("translate", summary))
+        }
+
+        // ── Picker-required (Phase D follow-up: needs args from caller) ─────
+        "gif_save" | "macro_run" | "lua_run" | "network_diag" => {
+            Err(CommandError::NotDispatchable {
+                action: action_id.to_string(),
+                reason: "needs caller-supplied arguments (Phase D follow-up)",
+            })
+        }
 
         unknown => Err(CommandError::UnknownAction(unknown.to_string())),
     }
 }
 
+/// Launch a URL via the Windows shell (`explorer <url>`). Falls back to
+/// `cmd /C start` if the explorer call fails so users with custom
+/// default-browser handlers still get a response.
+fn launch_url(url: &str) -> Result<(), String> {
+    use std::process::Command;
+    Command::new("cmd")
+        .args(["/C", "start", "", url])
+        .spawn()
+        .map_err(|e| format!("failed to spawn shell: {e}"))?;
+    Ok(())
+}
+
+/// Open a file or `.msc` snap-in via the Windows shell. Same dispatch
+/// path as `launch_url`; kept as a separate function so future tightening
+/// (path canonicalization, existence check) can land in one spot.
+fn launch_path(path: &str) -> Result<(), String> {
+    use std::process::Command;
+    Command::new("cmd")
+        .args(["/C", "start", "", path])
+        .spawn()
+        .map_err(|e| format!("failed to spawn shell: {e}"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn dummy_state() -> ApiState {
+        let bus = crate::features::FrameBus::new();
+        ApiState {
+            frame_bus: bus.clone(),
+            config: std::sync::Arc::new(tokio::sync::Mutex::new(
+                crate::config::AppConfig::default(),
+            )),
+            history: std::sync::Arc::new(tokio::sync::Mutex::new(
+                crate::config::ConnectionHistory::default(),
+            )),
+            stats: std::sync::Arc::new(tokio::sync::Mutex::new(
+                crate::ui::api::StreamStats::default(),
+            )),
+            api_token: String::new(),
+            recorder: crate::features::recording::RecordingController::new(bus.clone()),
+            replay: crate::features::session_replay::SessionPlaybackController::new(bus),
+            dashboard_url: "http://127.0.0.1:8080".into(),
+        }
+    }
 
     #[test]
     fn search_finds_by_id_name_and_category() {
@@ -469,22 +563,7 @@ mod tests {
 
     #[test]
     fn unknown_action_returns_unknown_error() {
-        let bus = crate::features::FrameBus::new();
-        let state = ApiState {
-            frame_bus: bus.clone(),
-            config: std::sync::Arc::new(tokio::sync::Mutex::new(
-                crate::config::AppConfig::default(),
-            )),
-            history: std::sync::Arc::new(tokio::sync::Mutex::new(
-                crate::config::ConnectionHistory::default(),
-            )),
-            stats: std::sync::Arc::new(tokio::sync::Mutex::new(
-                crate::ui::api::StreamStats::default(),
-            )),
-            api_token: String::new(),
-            recorder: crate::features::recording::RecordingController::new(bus.clone()),
-            replay: crate::features::session_replay::SessionPlaybackController::new(bus),
-        };
+        let state = dummy_state();
         let err = execute("not_a_real_action", &state).expect_err("should be unknown");
         match err {
             CommandError::UnknownAction(id) => assert_eq!(id, "not_a_real_action"),
@@ -493,24 +572,11 @@ mod tests {
     }
 
     #[test]
-    fn not_yet_wired_actions_report_phase() {
-        let bus = crate::features::FrameBus::new();
-        let state = ApiState {
-            frame_bus: bus.clone(),
-            config: std::sync::Arc::new(tokio::sync::Mutex::new(
-                crate::config::AppConfig::default(),
-            )),
-            history: std::sync::Arc::new(tokio::sync::Mutex::new(
-                crate::config::ConnectionHistory::default(),
-            )),
-            stats: std::sync::Arc::new(tokio::sync::Mutex::new(
-                crate::ui::api::StreamStats::default(),
-            )),
-            api_token: String::new(),
-            recorder: crate::features::recording::RecordingController::new(bus.clone()),
-            replay: crate::features::session_replay::SessionPlaybackController::new(bus),
-        };
-        for id in ["zoom_in", "color_pick", "settings"] {
+    fn phase_b_and_c_actions_still_report_not_dispatchable() {
+        let state = dummy_state();
+        // zoom_in is Phase B, color_pick is Phase C — both stay 409 until
+        // their respective follow-up PRs land.
+        for id in ["zoom_in", "color_pick"] {
             let err = execute(id, &state).expect_err("should not be dispatchable yet");
             assert!(
                 matches!(err, CommandError::NotDispatchable { .. }),
