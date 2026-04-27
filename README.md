@@ -1,52 +1,56 @@
 # ios-remote
 
 <p align="center">
-  <strong>USB Type-C経由でiPhoneの画面をPCにミラーリング＆操作するツール</strong><br>
-  Pure Rust製 / <strong>Windows 10 / 11 専用</strong> / MIT License
+  <strong>English</strong> · <a href="README.ja.md">日本語</a>
 </p>
 
-> ⚠️ **プラットフォーム:** 本ツールは Windows 10 / 11 **専用** です。macOS / Linux ではビルド時に `build.rs` がエラーを出します。これは `AppleMobileDeviceService` (Windows 版 iTunes / Apple Devices 付属) に依存しているためです。
+<p align="center">
+  <strong>Mirror &amp; control your iPhone's screen on your PC over USB Type-C</strong><br>
+  Pure Rust / <strong>Windows 10 / 11 only</strong> / MIT License
+</p>
+
+> ⚠️ **Platform:** This tool is **Windows 10 / 11 only**. The build is rejected on macOS / Linux by `build.rs` because it depends on `AppleMobileDeviceService`, which ships with iTunes / Apple Devices on Windows.
 
 ---
 
 ## Overview
 
-iPhoneをUSBケーブルでPCに接続するだけで、iPhoneの画面をリアルタイムでPCに表示します。Wi-Fi不要。脱獄不要。
+Plug your iPhone into your PC over USB and the screen mirrors to a desktop window in real time. No Wi-Fi. No jailbreak.
 
 ```
-iPhone ──USB-C──> PC (ios-remote) ──> ディスプレイウィンドウ
-                                  ──> 録画 / スクリーンショット
+iPhone ──USB-C──> PC (ios-remote) ──> Display window
+                                  ──> Recording / Screenshots
                                   ──> Web Dashboard
 ```
 
 ## Quick Start
 
 ```bash
-# ビルド
+# Build
 cargo build
 
-# 起動（iPhoneをUSBで接続してから）
+# Run (plug the iPhone in over USB first)
 cargo run
 
-# PiPモード（常に最前面）
+# PiP mode (always-on-top mini window)
 cargo run -- --pip
 
-# 録画付き
+# Recording on
 cargo run -- --record
 
-# 接続中のデバイス一覧（UDID 確認用）
+# List attached devices (to find a UDID)
 cargo run -- --list-devices
 
-# 特定の iPhone を UDID 指定で使う
+# Pin to a specific iPhone by UDID
 cargo run -- --device 00008120-001A2B3C4D5E6F78
 
-# LAN の他 PC からダッシュボードを使う（Bearer トークン必須）
+# Expose the dashboard on the LAN (Bearer token required)
 cargo run -- --lan
 ```
 
-### 初回起動時のログ
+### First launch
 
-起動直後に以下のようなログが出ます。`API token` の値をメモしてください（設定ファイルにも保存されます）。
+You'll see a log block like the one below right after startup. Note the `API token` value — it's also persisted to the config file.
 
 ```
 INFO  API token (Bearer): kQ3m7dF2-sLaP9xR0cT8vB1n
@@ -54,207 +58,209 @@ INFO  Local-only mode — use --lan to expose on all interfaces.
 INFO  Web dashboard: http://127.0.0.1:8080
 ```
 
-- 既定は `127.0.0.1` にのみバインドするため、同じ PC の Web ブラウザからのみ到達可能です。
-- `--lan` を付けると `0.0.0.0` にバインドし、LAN の他ホストからもアクセスできます。その際 API トークンは必須です。
-- トークンは `IOS_REMOTE_API_TOKEN` 環境変数で上書き、または `ios-remote.toml` の `[network] api_token` で固定できます。
+- Defaults bind to `127.0.0.1`, so the dashboard is reachable only from the same PC.
+- `--lan` flips the bind to `0.0.0.0` so other LAN hosts can connect. The API token is mandatory.
+- Override the token via the `IOS_REMOTE_API_TOKEN` env var, or pin it in `ios-remote.toml` under `[network] api_token`.
 
-### 必要なもの
+### Requirements
 
-| 項目 | 詳細 |
-|------|------|
-| **Windows 10 / 11** | 本ツールの動作 OS（他 OS 非対応） |
-| **USB Type-Cケーブル** | Lightning-to-Cでも可 |
-| **iTunes / Apple Devices** | Windowsにインストール（AppleMobileDeviceService / usbmuxd ドライバ提供） |
-| **「信頼」承認** | iPhone側で「このコンピュータを信頼しますか？」→「信頼」 |
-| **Rust 1.80+** | ビルド用 |
+| Item | Detail |
+|------|--------|
+| **Windows 10 / 11** | The only supported OS |
+| **USB Type-C cable** | Lightning-to-C is fine too |
+| **iTunes / Apple Devices** | Installed on Windows (provides the AppleMobileDeviceService / usbmuxd driver) |
+| **"Trust" prompt** | Tap "Trust" on the iPhone the first time you connect |
+| **Rust 1.80+** | For building from source |
 
-### 対応状況
+### Platform support
 
-- ✅ **Windows 10 / 11** — ネイティブ対応
-- ❌ **macOS / Linux** — 未対応（`build.rs` が build を拒否します）
-- ❌ **AirPlay モード** — v0.4.0 で削除、USB Type-C 一本化
+- ✅ **Windows 10 / 11** — Native
+- ❌ **macOS / Linux** — Not supported (`build.rs` rejects the build)
+- ❌ **AirPlay mode** — Removed in v0.4.0; USB Type-C only
 
 ## Features
 
-### Core — USB画面ミラーリング
-- **USB Type-C直結** — Wi-Fi不要、低遅延
-- **usbmuxd通信** — Appleの公式USBプロトコルを使用
-- **lockdowndセッション** — デバイス情報取得＆サービス起動
-- **screenshotrキャプチャ** — iPhoneの画面をリアルタイム取得
+### Core — USB screen mirroring
+- **Direct USB Type-C** — No Wi-Fi, low latency
+- **usbmuxd protocol** — Apple's official USB mux protocol
+- **lockdownd session** — Device info + service activation
+- **screenshotr capture** — Real-time screen frames from the iPhone
 
 ### Display
-- **PiPモード** — 常に最前面の小窓表示（`--pip`）
-- **アスペクト比維持** — レターボックスで画面崩れなし
-- **統計オーバーレイ** — FPS / 遅延 / 解像度をリアルタイム表示
-- **タッチオーバーレイ** — タップ位置にリップルアニメーション
-- **ホットキー** — `S`=スクリーンショット, `Q`/`Esc`=終了
+- **PiP mode** — Always-on-top mini window (`--pip`)
+- **Aspect-ratio preserved** — Letterboxed; no stretch
+- **Stats overlay** — FPS / latency / resolution in real time
+- **Touch overlay** — Ripple animation at the tap point
+- **Hotkeys** — `S`=screenshot, `Q`/`Esc`=quit
 
 ### Recording & Capture
-- **動画録画** — H.264ストリームをファイル保存（`--record`）
-- **スクリーンショット** — PNG保存（ホットキー or API）
-- **GIF生成** — 直近N秒をアニメーションGIFで保存
-- **タイムラプス** — 定期フレームキャプチャ
-- **モーション録画** — 画面変化時のみ録画（容量節約）
+- **Video recording** — H.264 stream saved to a file (`--record`)
+- **Screenshots** — PNG (hotkey or API)
+- **GIF** — Save the last N seconds as an animated GIF
+- **Time-lapse** — Periodic frame capture
+- **Motion-triggered recording** — Record only when the screen changes (saves disk)
 
 ### Screen Analysis
-- **OCR** — tesseract連携でテキスト抽出（日本語+英語）
-- **AI画面理解** — Claude APIで「今何が映っているか」を解析
-- **通知キャプチャ** — iOSバナー通知を自動検出＆保存
-- **QRコード検出** — 画面上のQR/バーコードを自動スキャン
-- **カラーピッカー** — マウス位置の色をHEX/RGB/HSLで取得
+- **OCR** — Tesseract-based text extraction (Japanese + English)
+- **AI screen understanding** — "What's on screen?" via the Claude API
+- **Notification capture** — Auto-detect and store iOS banner notifications
+- **QR / barcode scanner** — Picks up codes anywhere on screen
+- **Color picker** — HEX / RGB / HSL at the mouse cursor
 
 ### Automation
-- **マクロ** — JSON形式でタップ/スワイプ/待機を記録・再生
-- **Luaスクリプト** — Lua 5.4で高度な自動化（`--features lua`）
-- **ジェスチャーライブラリ** — ピンチ/回転/3指スワイプ等のプリセット
-- **音声コマンド** — 「スクリーンショット」と話して撮影
-- **スケジュールタスク** — cron式で定期実行
+- **Macros** — Record/replay tap / swipe / wait actions in JSON
+- **Lua scripting** — Lua 5.4 for advanced automation (`--features lua`)
+- **Gesture library** — Pre-built pinch / rotate / 3-finger swipe presets
+- **Voice commands** — Say "screenshot" to capture
+- **Scheduled tasks** — Cron-style periodic execution
 
 ### Visual Tools
-- **アノテーション** — 画面上に矢印/四角/テキスト/フリーハンドを描画
-- **ルーラー** — ピクセル距離計測
-- **デバイスフレーム** — iPhone筐体フレームをオーバーレイ（SS/動画用）
-- **iOSセーフエリア表示** — ノッチ/ダイナミックアイランドの安全領域
-- **デザイングリッド** — 8pt/4ptグリッドオーバーレイ
-- **色覚シミュレーション** — 色覚異常の見え方を再現
-- **プライバシーモード** — 特定領域をぼかし/ピクセレート
-- **ウォーターマーク** — 録画/配信に透かし
+- **Annotations** — Arrows / rectangles / text / freehand on top of the frame
+- **Ruler** — Pixel-distance measurement
+- **Device frame** — Overlay an iPhone bezel for screenshot / video polish
+- **iOS safe-area markers** — Notch / Dynamic Island guides
+- **Design grid** — 8pt / 4pt grid overlay
+- **Color-blindness simulation** — Render the screen as different vision types see it
+- **Privacy mode** — Blur or pixelate specific regions
+- **Watermark** — Stamped on recordings / live streams
 
 ### Streaming & Sharing
-- **RTMP配信** — Twitch/YouTubeへffmpeg経由でライブ配信
-- **OBS仮想カメラ** — 名前付きパイプでOBSに映像入力
-- **MJPEG共有** — ブラウザで画面をリモート閲覧
-- **Imgur即共有** — ワンキーでSS→アップロード→URL取得
-- **通知転送** — Discord / Slack / Telegram に検出通知を送信
+- **RTMP** — Twitch / YouTube live via ffmpeg
+- **OBS virtual camera** — Named-pipe video into OBS
+- **MJPEG** — Stream the screen to any browser
+- **Imgur instant share** — One-key screenshot → upload → URL
+- **Notification forwarding** — Push detected notifications to Discord / Slack / Telegram
 
 ### Analytics
-- **タッチヒートマップ** — クリック頻度のビジュアル化
-- **画面変化ハイライト** — フレーム間差分を色付き表示
-- **セッションリプレイ** — 記録セッションを Web Dashboard の Replay カードから再生 (`/api/replay/*`)。デコードに ffmpeg を利用 (下の Optional Dependencies 参照)
+- **Touch heatmap** — Visualize click frequency
+- **Frame-diff highlight** — Color-code per-frame deltas
+- **Session replay** — Recorded sessions play back from the Web Dashboard's Replay card (`/api/replay/*`). Decoding uses ffmpeg (see Optional Dependencies below)
 
 ### Developer Tools
-- **コマンドパレット** — 33コマンドをファジー検索
-- **プロトコルアナライザー** — RTSP/usbmuxdメッセージの詳細ログ
-- **ネットワーク診断** — ping / 遅延 / ジッター測定
-- **帯域スロットリング** — ネットワーク使用量を制限
-- **接続タイムライン** — イベントの時系列ビジュアル
+- **Command palette** — Fuzzy search across 33 commands
+- **Protocol analyzer** — Detailed RTSP / usbmuxd message logs
+- **Network diagnostics** — Ping / latency / jitter
+- **Bandwidth throttling** — Cap network usage
+- **Connection timeline** — Chronological event view
 
 ### System Integration
-- **Web Dashboard** — ブラウザでステータス確認＆操作（http://localhost:8080）
-- **REST API** — 16エンドポイントでプログラマブル制御
-- **設定ファイル** — TOML形式の永続設定
-- **接続履歴** — 過去に接続したデバイスを記録
-- **Windows起動時自動起動** — レジストリ登録
-- **システムトレイ** — 最小化して常駐
-- **自動アップデーター** — GitHub Releasesから新版を通知
-- **ポータブルモード** — USBメモリから実行可能
-- **i18n** — 日本語 / English / 中文 / 한국어
-- **テーマ** — Dark / Light / Midnight / Nature
+- **Web Dashboard** — Browser-based status + control (http://localhost:8080)
+- **REST API** — 18 endpoints for programmatic control
+- **Config file** — Persistent TOML config
+- **Connection history** — Logs previously connected devices
+- **Run on Windows startup** — Registry-based auto-start
+- **System tray** — Minimize to tray
+- **Auto-updater** — Notifies on new GitHub Releases
+- **Portable mode** — Run from a USB stick
+- **i18n** — Japanese / English / Chinese / Korean
+- **Themes** — Dark / Light / Midnight / Nature
 
 ## Troubleshooting
 
-| 症状 | 確認ポイント |
-|------|--------------|
-| `Cannot connect to usbmuxd` | iTunes / Apple Devices が起動し `AppleMobileDeviceService` が Windows サービスとして走っているか |
-| `No iPhone connected` | USB ケーブル、接続ポート、iPhone 側の「信頼」タップ |
-| 画面が固まる | USB-C ケーブルがデータ通信対応か（充電専用ケーブルでは動きません） |
-| 起動直後に自動再接続を繰り返す | `--list-devices` で UDID を確認し、`--device <UDID>` で固定 |
-| ブラウザで Web Dashboard に `401 Unauthorized` | 起動ログの API token を確認、URL 直打ちではなく `/` から開くかヘッダ付きで叩く |
-| `Failed to bind Web dashboard` | `-w <PORT>` で別ポートを指定 |
-| 複数 iPhone を同時接続したい | 現時点では 1 台ずつ。`--device` で切り替え |
+| Symptom | Things to check |
+|---------|------------------|
+| `Cannot connect to usbmuxd` | iTunes / Apple Devices installed and `AppleMobileDeviceService` running as a Windows service |
+| `No iPhone connected` | USB cable, port, the "Trust" tap on the iPhone |
+| Screen freezes | Whether the USB-C cable supports data (charge-only cables won't work) |
+| Endless reconnect right after launch | Run `--list-devices` and pin the UDID with `--device <UDID>` |
+| `401 Unauthorized` in the dashboard | Use the API token from the startup log; open the dashboard from `/` (it embeds the token) instead of typing API URLs |
+| `Failed to bind Web dashboard` | Pick a different port with `-w <PORT>` |
+| Multiple iPhones at once | One device at a time today; switch with `--device` |
 
-## Macro setup (iOS 入力送信)
+## Macro setup (sending iOS input)
 
-`MacroAction::Tap` / `Swipe` / `LongPress` は [WebDriverAgent (WDA)](https://github.com/appium/WebDriverAgent) を介して iPhone に入力を送ります。`screenshotr` サービスは読み取り専用なので、入力には Apple Developer 証明書で署名した WDA のサイドロードが必須です。
+`MacroAction::Tap` / `Swipe` / `LongPress` send taps to the iPhone via [WebDriverAgent (WDA)](https://github.com/appium/WebDriverAgent). The `screenshotr` service is read-only, so input requires a sideloaded WDA signed with an Apple Developer cert.
 
-1. WDA を Xcode でビルドし iPhone にインストール
-2. iPhone 上で WDA を一度起動し、ポート 8100 で待ち受けていることを確認
-3. PC 側で `iproxy 8100 8100` 等で USB ポートを転送
-4. 起動時に環境変数 `IOS_REMOTE_WDA_URL=http://127.0.0.1:8100` を指定（既定でも同じ値）
-5. `POST /api/macros/run` か `F7` キーでマクロ実行
+1. Build WDA in Xcode and install it on the iPhone
+2. Launch WDA on the iPhone once and confirm it's listening on port 8100
+3. On the PC, forward the USB port (e.g. `iproxy 8100 8100`)
+4. Set `IOS_REMOTE_WDA_URL=http://127.0.0.1:8100` (the default value too)
+5. Trigger macros via `POST /api/macros/run` or the `F7` hotkey
 
-WDA が起動していない場合、`Tap`/`Swipe`/`LongPress` アクションはエラーで返りますが、プロセスは落ちません（`Wait` や `Screenshot` アクションは引き続き動きます）。
+If WDA isn't running, `Tap` / `Swipe` / `LongPress` actions return errors but the process won't crash — `Wait` and `Screenshot` actions keep working.
 
 ## Session Replay
 
-`recordings/` に保存されたセッション (`session.json` / `bookmarks.json` / `video.h264` を含むディレクトリ) を Web Dashboard の Replay カードから再生できます。
+Sessions saved under `recordings/` (a directory containing `session.json` / `bookmarks.json` / `video.h264`) play back from the Replay card in the Web Dashboard.
 
-### 手順
+### Steps
 
-1. `F2` または `POST /api/recording/start` でセッションを記録 → 停止で `recordings/session_YYYYMMDD_HHMMSS/` が作成されます
-2. Dashboard を開き、Replay カードの **Refresh** で一覧を更新
-3. セッションを選択して **Load** → ヘッダ情報 (解像度 / フレーム数 / 長さ) とブックマークが表示されます
-4. **Play** で再生開始、**Pause** で停止
-5. スライダーまたはブックマークボタンでシーク (再生中のシークは拒否されるので、一度 Pause してからシークしてください)
+1. Record a session with `F2` or `POST /api/recording/start` → stopping creates `recordings/session_YYYYMMDD_HHMMSS/`.
+2. Open the dashboard and hit **Refresh** in the Replay card to populate the list.
+3. Pick a session and click **Load** — header info (resolution / frame count / length) and bookmarks appear.
+4. **Play** to start, **Pause** to stop.
+5. Use the slider or bookmark buttons to seek (seek-while-playing is rejected; pause first, seek, then resume).
 
-### ffmpeg 依存
+### ffmpeg dependency
 
-デコードは ffmpeg サブプロセス (`-f h264 -i pipe:0 -f rawvideo -pix_fmt rgba pipe:1`) で行います。未インストールの場合 `POST /api/replay/play` は `{ "status": "error", "error": "spawn ffmpeg: ..." }` を返します。下の Optional Dependencies 参照。
+Decoding spawns an ffmpeg subprocess (`-f h264 -i pipe:0 -f rawvideo -pix_fmt rgba pipe:1`). If ffmpeg isn't installed, `POST /api/replay/play` returns `{ "status": "error", "error": "spawn ffmpeg: ..." }`. See Optional Dependencies below.
 
-### 既知の制限
+### Known limitations
 
-- シーク位置は比例マッピング (NAL 単位、タイムスタンプ精度は粗い)
-- 再生速度は 1.0× 固定
-- ffmpeg 未インストール時は録画 / Replay / RTMP がすべて no-op になります (エンコーダも ffmpeg を使うため)
+- Seek positions are mapped proportionally (NAL-unit granularity, coarse timestamp accuracy)
+- Playback speed is fixed at 1.0×
+- With ffmpeg missing, recording / replay / RTMP all become no-ops (the encoder also uses ffmpeg)
 
 ## Web Dashboard
 
-ブラウザで `http://localhost:8080` を開くとリアルタイムダッシュボードが使えます。トークンはダッシュボード HTML にインラインで埋め込まれ、fetch 呼び出しに自動付与されます。カード構成: Status / Actions / Replay / Log / Connection History。
+`http://localhost:8080` opens a real-time dashboard. The token is inlined into the dashboard HTML and attached automatically to fetch calls. Cards: Status / Actions / Replay / Log / Connection History.
 
 ### REST API
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/status` | GET | 接続状態 |
-| `/api/stats` | GET | ストリーム統計 |
-| `/api/screenshot` | POST | スクリーンショット撮影 |
-| `/api/recording/start` | POST | 録画開始 |
-| `/api/recording/stop` | POST | 録画停止 |
-| `/api/ocr` | POST | テキスト抽出 |
-| `/api/ai/describe` | POST | AI画面解析 |
-| `/api/config` | GET/POST | 設定読み書き |
-| `/api/history` | GET | 接続履歴 |
-| `/api/macros` | GET | マクロ一覧 |
-| `/api/macros/run` | POST | マクロ実行 |
-| `/api/replay/sessions` | GET | 記録セッション一覧 |
-| `/api/replay/load` | POST | セッションをロード |
-| `/api/replay/play` | POST | 再生開始 |
-| `/api/replay/pause` | POST | 一時停止 |
-| `/api/replay/seek` | POST | シーク (pause 中のみ) |
-| `/api/commands` | GET | Command Palette 全コマンド一覧 |
-| `/api/command/{id}` | POST | Command Palette のアクションを dispatch |
+| `/api/status` | GET | Connection state |
+| `/api/stats` | GET | Stream statistics |
+| `/api/screenshot` | POST | Take a screenshot |
+| `/api/recording/start` | POST | Start recording |
+| `/api/recording/stop` | POST | Stop recording |
+| `/api/ocr` | POST | Extract text |
+| `/api/ai/describe` | POST | AI screen understanding |
+| `/api/config` | GET/POST | Read / write config |
+| `/api/history` | GET | Connection history |
+| `/api/macros` | GET | List macros |
+| `/api/macros/run` | POST | Run a macro |
+| `/api/replay/sessions` | GET | List recorded sessions |
+| `/api/replay/load` | POST | Load a session |
+| `/api/replay/play` | POST | Start playback |
+| `/api/replay/pause` | POST | Pause |
+| `/api/replay/seek` | POST | Seek (only while paused) |
+| `/api/audio/status` | GET | Current audio source + active subtitles |
+| `/api/subtitles` | GET | Subtitle history (up to 50 entries) |
+| `/api/commands` | GET | All Command Palette commands |
+| `/api/command/{id}` | POST | Dispatch a Command Palette action |
 
 ### Command Palette dispatch
 
-33 個の Command Palette アクションを REST / Stream Deck / 内部ホットキーから同じ経路で起動できます。`/api/command/{id}` の HTTP ステータスでハンドラの状況がわかります:
+The 33 Command Palette actions can be invoked from REST / Stream Deck / internal hotkeys through a single dispatch path. The HTTP status returned by `/api/command/{id}` reveals what the handler did:
 
-| ステータス | 意味 | ボディの形 |
-|---|---|---|
-| `200` | 実行成功 | `{ "ok": true, "action": "<id>", "message": "<result>" }` |
-| `404` | 未知の action id | `{ "ok": false, "error": "unknown_action", "action": "<id>" }` |
-| `409` | アクションは認識したが、まだ dispatch 経路がない(対話的入力待ち、引数必要、別 PR で実装中など) | `{ "ok": false, "error": "not_dispatchable", "action": "<id>", "reason": "<理由>" }` |
-| `503` | フレーム未受信(画面解析系コマンドはデバイス接続後に実行してください) | `{ "ok": false, "error": "no_frame", "reason": "<理由>" }` |
-| `500` | ハンドラが失敗 | `{ "ok": false, "error": "handler_failed", "action": "<id>", "message": "<詳細>" }` |
+| Status | Meaning | Body shape |
+|--------|---------|------------|
+| `200` | Success | `{ "ok": true, "action": "<id>", "message": "<result>" }` |
+| `404` | Unknown action id | `{ "ok": false, "error": "unknown_action", "action": "<id>" }` |
+| `409` | Action recognized but not yet dispatchable (waiting on interactive input, requires args, scheduled for a future PR) | `{ "ok": false, "error": "not_dispatchable", "action": "<id>", "reason": "<why>" }` |
+| `503` | No frame received yet (analysis-style commands need an attached device) | `{ "ok": false, "error": "no_frame", "reason": "<why>" }` |
+| `500` | Handler failed | `{ "ok": false, "error": "handler_failed", "action": "<id>", "message": "<details>" }` |
 
-v0.6 時点で **22/33 アクションが dispatch 完了**(screenshot / recording / OCR / AI describe / QR / zoom / game_mode / annotation_clear / web_dashboard / settings / firewall_setup / translate / startup_toggle / quit / color_pick ほか)。残りは Phase C 続編(annotation_*, ruler, privacy_*)と引数を要するもの(macro_run, lua_run, network_diag, gif_save)で、`409` を返して理由を明示します。
+As of v0.6, **22 / 33 actions dispatch live** (screenshot / recording / OCR / AI describe / QR / zoom / game_mode / annotation_clear / web_dashboard / settings / firewall_setup / translate / startup_toggle / quit / color_pick and more). The rest are Phase C continuations (annotation_*, ruler, privacy_*) and arg-requiring commands (macro_run, lua_run, network_diag, gif_save) — they return `409` with an explicit reason.
 
 ### Stream Deck integration
 
-`--features stream_deck` でビルドすると、Elgato Stream Deck の各ボタンが Command Palette アクションを発火するイベントループが起動します。デフォルトレイアウトは: screenshot / record_start / record_stop / ocr / gif_save / pip_toggle / game_mode / ai_describe(8 ボタン)。各押下は Command Palette dispatch に流れるので、REST と Stream Deck で挙動が常に一致します。
+Building with `--features stream_deck` starts an event loop that maps each Elgato Stream Deck button to a Command Palette action. Default 8-button layout: screenshot / record_start / record_stop / ocr / gif_save / pip_toggle / game_mode / ai_describe. Every press flows through Command Palette dispatch, so REST and Stream Deck behavior stays in lockstep.
 
 ### Activity indicator
 
-ディスプレイウィンドウのタイトルバーが録画 / リプレイ状態を示します:
-- `ios-remote — USB Mirror` — アイドル
-- `ios-remote — ● REC` — 録画中
-- `ios-remote — ▶ REPLAY` — セッションリプレイ中
-- `ios-remote — ● REC · ▶ REPLAY · [PiP]` — 複合状態
+The display window's title bar reflects recording / replay state:
+- `ios-remote — USB Mirror` — idle
+- `ios-remote — ● REC` — recording
+- `ios-remote — ▶ REPLAY` — session replay running
+- `ios-remote — ● REC · ▶ REPLAY · [PiP]` — combined
 
-REST や Stream Deck から状態が変わってもタイトルが追従するので、ログを見なくても状況がわかります。
+Title updates follow REST / Stream Deck-driven state changes, so you can read the current state without watching logs.
 
 ## Configuration
 
-`ios-remote.toml` で設定をカスタマイズ:
+Customize via `ios-remote.toml`:
 
 ```toml
 [receiver]
@@ -270,9 +276,9 @@ auto_record = false
 output_dir = "recordings"
 
 [network]
-bind_address = "127.0.0.1"   # "0.0.0.0" にすると LAN 公開。--lan でも同等
-lan_access = false            # true にすると bind_address を強制的に 0.0.0.0 扱いに
-api_token = ""                # 空で起動すると自動生成してここに書き込まれます
+bind_address = "127.0.0.1"   # Set to "0.0.0.0" to expose on the LAN. --lan does the same.
+lan_access = false            # true forces bind_address to 0.0.0.0.
+api_token = ""                # Empty → auto-generated and written back on first launch.
 
 [features]
 notification_capture = true
@@ -317,70 +323,68 @@ ai_vision = false
 
 | Key | Action |
 |-----|--------|
-| `S` | スクリーンショット |
-| `Q` / `Esc` | 終了 |
-| `P` | PiP切替 |
-| `R` | ズームリセット |
-| `F2` | 録画開始/停止 |
-| `F3` | OCR実行 |
-| `F4` | 統計オーバーレイ切替 |
-| `F5` | ゲームモード切替 |
-| `G` | GIF保存 |
-| `I` | カラーピッカー |
-| `M` | ルーラー |
-| `Scroll` | ズーム |
+| `S` | Screenshot |
+| `Q` / `Esc` | Quit |
+| `P` | Toggle PiP |
+| `R` | Reset zoom |
+| `F2` | Start / stop recording |
+| `F3` | Run OCR |
+| `F4` | Toggle stats overlay |
+| `F5` | Toggle game mode |
+| `G` | Save GIF |
+| `I` | Color picker |
+| `M` | Ruler |
+| `Scroll` | Zoom |
 
 ## Optional Dependencies
 
-| ツール | 用途 | インストール |
-|--------|------|-------------|
-| tesseract-ocr | OCRテキスト抽出 | [tesseract](https://github.com/tesseract-ocr/tesseract) |
-| ffmpeg | RTMP配信 / 録画変換 / セッションリプレイのデコード | [ffmpeg.org](https://ffmpeg.org) |
-| `ANTHROPIC_API_KEY` | AI画面理解 | [anthropic.com](https://console.anthropic.com) |
-| `OPENAI_API_KEY` | 音声文字起こし（OpenAI Whisper API） | [openai.com](https://platform.openai.com) |
-| `IMGUR_CLIENT_ID` | Imgur即共有 | [imgur.com/account/settings/apps](https://imgur.com/account/settings/apps) |
-| ggml-base.bin | ローカル Whisper（API キー不要） | [whisper.cpp models](https://huggingface.co/ggerganov/whisper.cpp) |
+| Tool | Purpose | Install |
+|------|---------|---------|
+| tesseract-ocr | OCR text extraction | [tesseract](https://github.com/tesseract-ocr/tesseract) |
+| ffmpeg | RTMP streaming / recording transcode / Session Replay decode | [ffmpeg.org](https://ffmpeg.org) |
+| `ANTHROPIC_API_KEY` | AI screen understanding | [anthropic.com](https://console.anthropic.com) |
+| `OPENAI_API_KEY` | Audio transcription (OpenAI Whisper API) | [openai.com](https://platform.openai.com) |
+| `IMGUR_CLIENT_ID` | Imgur instant share | [imgur.com/account/settings/apps](https://imgur.com/account/settings/apps) |
+| ggml-base.bin | Local Whisper (no API key required) | [whisper.cpp models](https://huggingface.co/ggerganov/whisper.cpp) |
 
 ## Audio capture & transcription
 
-PC のシステム音声を **WASAPI ループバック**で取り込み、Whisper にかけて
-ライブ字幕として表示ウィンドウに重ねます（既定の出力デバイスがない場合は
-マイクへフォールバック）。
+Captures the PC's system audio over **WASAPI loopback**, runs it through Whisper, and overlays live subtitles on the display window. Falls back to the default microphone when no output device is available.
 
-### ビルドフラグ
+### Build flags
 
 ```sh
-# OpenAI Whisper API パス（OPENAI_API_KEY が必要、ローカルモデル不要）
+# OpenAI Whisper API path (needs OPENAI_API_KEY, no local model required)
 cargo build --features audio_capture
 
-# ローカル whisper.cpp パス（オフライン、ggml モデルが必要）
-cargo build --features whisper   # audio_capture を内包
+# Local whisper.cpp path (offline, ggml model required)
+cargo build --features whisper   # implies audio_capture
 ```
 
-### 設定
+### Configuration
 
-`ios-remote.toml` の `[audio]` ブロック（既存 toml は自動で既定値が入ります）:
+The `[audio]` block in `ios-remote.toml` (existing files get default values automatically):
 
 ```toml
 [audio]
 source = "loopback"   # "loopback" | "mic" | "off"
 chunk_secs = 5
-# language = "ja"     # 省略時は Whisper の自動判定
+# language = "ja"     # Whisper auto-detects when omitted
 ```
 
-### 環境変数
+### Environment variables
 
-| 変数 | 用途 |
-|------|------|
-| `IOS_REMOTE_WHISPER_MODEL` | ggml モデルへのパス（既定 `%APPDATA%\ios-remote\models\ggml-base.bin`） |
-| `OPENAI_API_KEY` | ローカル whisper が使えない場合の API フォールバック |
+| Variable | Purpose |
+|----------|---------|
+| `IOS_REMOTE_WHISPER_MODEL` | Path to the ggml model (default `%APPDATA%\ios-remote\models\ggml-base.bin`) |
+| `OPENAI_API_KEY` | API fallback when local whisper isn't available |
 
 ### REST
 
-| エンドポイント | 説明 |
-|----------------|------|
-| `GET /api/audio/status` | 現在のソースとアクティブな字幕 |
-| `GET /api/subtitles` | バッファに残る字幕履歴（最大 50 件） |
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/audio/status` | Current source + active subtitles |
+| `GET /api/subtitles` | Subtitle history (up to 50 entries) |
 
 ## Project Structure
 
@@ -394,12 +398,13 @@ src/
 │   ├── lockdown.rs       lockdownd client
 │   ├── screen_capture.rs screenshotr capture loop
 │   └── device.rs         device management
-├── features/            All feature modules (65 default + 6 experimental)
+├── features/            All feature modules (65 default + 6 experimental + 1 audio_capture-gated)
 │   ├── display.rs        Window rendering
 │   ├── recording.rs      Video recording
 │   ├── screenshot.rs     PNG capture
 │   ├── ocr.rs            Text extraction
 │   ├── ai_vision.rs      Claude API vision
+│   ├── audio_capture.rs  WASAPI loopback (gated behind `audio_capture`)
 │   ├── ...               (55+ more modules; 6 gated behind `experimental`)
 │   └── zoom.rs           Zoom & pan
 ├── ui/                  Web interface
@@ -435,13 +440,16 @@ cargo build --release
 # With Lua scripting
 cargo build --features lua
 
-# Stream Deck ボタン連携（HID、要実機）
+# Stream Deck button integration (HID; requires hardware)
 cargo build --features stream_deck
 
-# ローカル Whisper 文字起こし（要 ggml モデル）
+# WASAPI loopback audio capture (with OpenAI Whisper API fallback)
+cargo build --features audio_capture
+
+# Local Whisper transcription (requires ggml model)
 cargo build --features whisper
 
-# 実験機能 (app_detector / benchmark / mouse_gesture / pdf_export / presentation / video_filter)
+# Experimental features (app_detector / benchmark / mouse_gesture / pdf_export / presentation / video_filter)
 cargo build --features experimental
 
 # Run tests
@@ -450,11 +458,11 @@ cargo test
 
 ## CI/CD
 
-GitHub Actions で **Windows の自動ビルドとリリース**を実行します（macOS / Linux はビルド対象外）:
+GitHub Actions runs **automated Windows builds and releases** (macOS / Linux are out of scope):
 
 ```bash
-# タグを打ってリリース
-git tag v0.4.0
+# Cut a release
+git tag v0.7.0
 git push --tags
 ```
 
@@ -462,8 +470,8 @@ git push --tags
 
 1. Fork this repository
 2. Create a feature branch
-3. `cargo test` が通ることを確認
-4. Pull Request を作成
+3. Confirm `cargo test` passes
+4. Open a Pull Request
 
 ## License
 
