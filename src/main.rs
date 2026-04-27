@@ -232,6 +232,12 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(not(feature = "stream_deck"))]
     let _ = &api_state; // silence the "only used when feature is on" lint
 
+    // ── iproxy supervisor (auto-tunnel for WebDriverAgent macros) ───────────
+    // Held for the lifetime of main; on Ctrl+C the OS reaps the child along
+    // with us. Returns None silently if iproxy isn't on PATH or port 8100 is
+    // already forwarded — neither is fatal.
+    let _iproxy = features::iproxy_supervisor::try_spawn(cli.device.as_deref());
+
     // ── USB connection (main task) ──────────────────────────────────────────
     let receiver = usb::UsbReceiver::new(frame_bus).with_udid(cli.device.clone());
     receiver.run().await?;
