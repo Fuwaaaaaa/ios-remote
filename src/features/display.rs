@@ -108,44 +108,6 @@ fn compose_title(pip: bool, recording: bool, replaying: bool) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn idle_title_has_no_indicator() {
-        assert_eq!(compose_title(false, false, false), "ios-remote — USB Mirror");
-    }
-
-    #[test]
-    fn pip_only_shows_marker() {
-        assert_eq!(compose_title(true, false, false), "ios-remote — [PiP]");
-    }
-
-    #[test]
-    fn recording_indicator_overrides_idle_title() {
-        let t = compose_title(false, true, false);
-        assert!(t.contains("● REC"), "got: {t}");
-    }
-
-    #[test]
-    fn replay_indicator_overrides_idle_title() {
-        let t = compose_title(false, false, true);
-        assert!(t.contains("▶ REPLAY"), "got: {t}");
-    }
-
-    #[test]
-    fn all_three_states_concatenate_in_order() {
-        let t = compose_title(true, true, true);
-        // recording first, then replay, then PiP.
-        let rec_pos = t.find("● REC").expect("missing rec");
-        let rep_pos = t.find("▶ REPLAY").expect("missing replay");
-        let pip_pos = t.find("[PiP]").expect("missing pip");
-        assert!(rec_pos < rep_pos);
-        assert!(rep_pos < pip_pos);
-    }
-}
-
 /// Convert RGBA [u8] to RGB32 [u32] for minifb (0x00RRGGBB).
 fn rgba_to_rgb32(rgba: &[u8], width: usize, height: usize) -> Vec<u32> {
     let pixel_count = width * height;
@@ -198,4 +160,42 @@ pub fn yuv420_to_rgba(
     }
 
     rgba
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn idle_title_has_no_indicator() {
+        assert_eq!(compose_title(false, false, false), "ios-remote — USB Mirror");
+    }
+
+    #[test]
+    fn pip_only_shows_marker() {
+        assert_eq!(compose_title(true, false, false), "ios-remote — [PiP]");
+    }
+
+    #[test]
+    fn recording_indicator_overrides_idle_title() {
+        let t = compose_title(false, true, false);
+        assert!(t.contains("● REC"), "got: {t}");
+    }
+
+    #[test]
+    fn replay_indicator_overrides_idle_title() {
+        let t = compose_title(false, false, true);
+        assert!(t.contains("▶ REPLAY"), "got: {t}");
+    }
+
+    #[test]
+    fn all_three_states_concatenate_in_order() {
+        let t = compose_title(true, true, true);
+        // recording first, then replay, then PiP.
+        let rec_pos = t.find("● REC").expect("missing rec");
+        let rep_pos = t.find("▶ REPLAY").expect("missing replay");
+        let pip_pos = t.find("[PiP]").expect("missing pip");
+        assert!(rec_pos < rep_pos);
+        assert!(rep_pos < pip_pos);
+    }
 }

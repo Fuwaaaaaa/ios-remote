@@ -30,6 +30,11 @@ pub struct ApiState {
     /// Playback lifecycle handle — shared with the decode task spawned by
     /// `SessionPlaybackController::play()`.
     pub replay: SessionPlaybackController,
+    /// Public URL of the local dashboard (e.g. `http://127.0.0.1:8080`).
+    /// Populated from the resolved bind address + port at startup so the
+    /// `web_dashboard` command can launch a browser at the right URL even
+    /// when `--web-port` or `--lan` shifts it.
+    pub dashboard_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -435,6 +440,7 @@ mod tests {
             api_token: String::new(),
             recorder: RecordingController::new(bus.clone()),
             replay: SessionPlaybackController::new(bus),
+            dashboard_url: "http://127.0.0.1:8080".into(),
         })
     }
 

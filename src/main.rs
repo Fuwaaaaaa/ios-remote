@@ -168,6 +168,13 @@ async fn main() -> anyhow::Result<()> {
     // ── Shared API state ────────────────────────────────────────────────────
     // Built up-front (before the web spawn) so the Stream Deck HID thread
     // can also dispatch through it.
+    let dashboard_url = if app_config.network.lan_access {
+        // Browser opens locally; even with --lan we want the loopback URL on
+        // this machine (the LAN form would require knowing this host's IP).
+        format!("http://127.0.0.1:{}", cli.web_port)
+    } else {
+        format!("http://{}", web_addr)
+    };
     let api_state = std::sync::Arc::new(ui::api::ApiState {
         frame_bus: frame_bus.clone(),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(app_config.clone())),
@@ -178,6 +185,7 @@ async fn main() -> anyhow::Result<()> {
         api_token: api_token.clone(),
         recorder: recorder.clone(),
         replay: replay.clone(),
+        dashboard_url,
     });
 
     // ── Web dashboard ───────────────────────────────────────────────────────
