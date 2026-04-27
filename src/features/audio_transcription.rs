@@ -48,11 +48,15 @@ impl Transcriber {
         self.started.elapsed().as_millis() as u64
     }
 
-    pub fn add_subtitle(&mut self, text: &str, timestamp_ms: u64) {
+    pub fn add_subtitle(&mut self, text: &str, timestamp_ms: u64, duration_ms: u64) {
         self.subtitles.push(Subtitle {
             text: text.to_string(),
             start_ms: timestamp_ms,
-            duration_ms: 3000,
+            // Floor at 3 s so very small chunk sizes still leave a readable
+            // trail; otherwise honor the caller's window (typically the
+            // capture chunk length) so 5–10 s chunks don't blank out before
+            // the next one arrives.
+            duration_ms: duration_ms.max(3000),
         });
         if self.subtitles.len() > self.max_subtitles {
             self.subtitles.remove(0);
@@ -162,33 +166,81 @@ pub fn transcribe_blocking(
         openai_api_key.ok_or_else(|| "OPENAI_API_KEY not set; cannot transcribe".to_string())?;
     let wav = super::audio_viz::f32_to_wav_bytes(pcm_16k_mono, 16_000, 1);
     // Per-process unique temp file so two concurrent ios-remote instances
-    // don't trample each other's uploads.
+    // don't trample each other's uploads. Removed below regardless of how
+    // the call exits — set IOS_REMOTE_KEEP_AUDIO_TMP=1 to retain for debug.
     let temp = std::env::temp_dir().join(format!("ios_remote_audio_{}.wav", std::process::id()));
     std::fs::write(&temp, &wav).map_err(|e| e.to_string())?;
 
-    let output = std::process::Command::new("curl")
-        .args([
-            "-s",
-            "-X",
-            "POST",
-            "https://api.openai.com/v1/audio/transcriptions",
-            "-H",
-            &format!("Authorization: Bearer {}", api_key),
-            "-F",
-            &format!("file=@{}", temp.display()),
-            "-F",
-            "model=whisper-1",
-            "-F",
-            "response_format=text",
-        ])
-        .output()
-        .map_err(|e| format!("curl failed: {}", e))?;
+    let result = run_openai_curl(&api_key, &temp);
 
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if std::env::var_os("IOS_REMOTE_KEEP_AUDIO_TMP").is_none() {
+        let _ = std::fs::remove_file(&temp);
+    }
+
+    let text = result?;
     if !text.is_empty() {
         info!(text = %text, "Audio transcribed (OpenAI)");
     }
     Ok(text)
+}
+
+/// Invoke `curl` with a stdin-fed config so neither the API key nor the
+/// `Authorization: Bearer` header ever appear on the process command line.
+/// On Windows other local users (and any tool that lists processes) can
+/// read command lines, so passing the secret via `-H "Authorization: …"`
+/// is a real exposure path. `-K -` reads the config from stdin instead.
+fn run_openai_curl(api_key: &str, wav_path: &std::path::Path) -> Result<String, String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    // curl's config syntax treats backslashes inside double quotes as escape
+    // characters. Forward slashes are accepted on Windows, so normalize to
+    // sidestep escape handling. The api_key is alphanumeric+`-_`, no escaping
+    // needed; we still use a defensive escape pass to be safe.
+    let wav_str = wav_path.display().to_string().replace('\\', "/");
+    let safe_key = escape_curl_config_value(api_key);
+    let safe_path = escape_curl_config_value(&wav_str);
+
+    let config = format!(
+        "silent\n\
+         request = \"POST\"\n\
+         url = \"https://api.openai.com/v1/audio/transcriptions\"\n\
+         header = \"Authorization: Bearer {safe_key}\"\n\
+         form = \"file=@{safe_path}\"\n\
+         form = \"model=whisper-1\"\n\
+         form = \"response_format=text\"\n"
+    );
+
+    let mut child = Command::new("curl")
+        .arg("-K")
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("curl spawn failed: {e}"))?;
+
+    {
+        let stdin = child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| "curl stdin not available".to_string())?;
+        stdin
+            .write_all(config.as_bytes())
+            .map_err(|e| format!("curl stdin write failed: {e}"))?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("curl wait failed: {e}"))?;
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Escape a value to be embedded inside a `curl -K` config double-quoted
+/// string. Per `curl(1)`, backslash and double quote are the only specials.
+fn escape_curl_config_value(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 #[cfg(feature = "whisper")]
@@ -303,11 +355,35 @@ mod tests {
     }
 
     #[test]
+    fn escape_curl_config_value_handles_specials() {
+        // Backslashes and double quotes are the only specials inside a
+        // curl `-K` double-quoted value; everything else passes through.
+        assert_eq!(escape_curl_config_value("plain"), "plain");
+        assert_eq!(escape_curl_config_value("a\\b"), "a\\\\b");
+        assert_eq!(escape_curl_config_value("a\"b"), "a\\\"b");
+        assert_eq!(escape_curl_config_value("a\\b\"c"), "a\\\\b\\\"c");
+    }
+
+    #[test]
+    fn add_subtitle_floors_duration_to_three_seconds() {
+        let mut t = Transcriber::new();
+        t.add_subtitle("brief", 0, 500);
+        assert_eq!(t.subtitles[0].duration_ms, 3000);
+    }
+
+    #[test]
+    fn add_subtitle_honors_duration_above_floor() {
+        let mut t = Transcriber::new();
+        t.add_subtitle("longer chunk", 0, 7_000);
+        assert_eq!(t.subtitles[0].duration_ms, 7_000);
+    }
+
+    #[test]
     fn add_subtitle_drops_oldest_past_cap() {
         let mut t = Transcriber::new();
         t.max_subtitles = 3;
         for i in 0..5 {
-            t.add_subtitle(&format!("line {i}"), i * 1000);
+            t.add_subtitle(&format!("line {i}"), i * 1000, 3000);
         }
         assert_eq!(t.subtitles.len(), 3);
         assert_eq!(t.subtitles[0].text, "line 2");

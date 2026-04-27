@@ -266,6 +266,7 @@ pub fn spawn_transcription_pump(
     chunk_secs: u32,
 ) {
     let chunk_secs = chunk_secs.max(1);
+    let subtitle_duration_ms = chunk_secs as u64 * 1000;
     tokio::spawn(async move {
         let mut rx = bus.subscribe();
         let target_rate = 16_000u32;
@@ -281,7 +282,10 @@ pub fn spawn_transcription_pump(
                     let reset =
                         chunk.sample_rate != current_rate || chunk.channels != current_channels;
                     if reset {
-                        current_rate = chunk.sample_rate;
+                        // Defensive: cpal should never publish a zero rate,
+                        // but downstream `step = current_rate / target_rate`
+                        // would stall the pump if it ever did.
+                        current_rate = chunk.sample_rate.max(1);
                         current_channels = chunk.channels.max(1);
                         buffer.clear();
                         if current_rate < target_rate && !warned_rate_mismatch {
@@ -344,7 +348,7 @@ pub fn spawn_transcription_pump(
                         match result {
                             Ok(Ok(text)) if !text.is_empty() => {
                                 let mut t = transcriber.lock().unwrap_or_else(|p| p.into_inner());
-                                t.add_subtitle(&text, ts_ms);
+                                t.add_subtitle(&text, ts_ms, subtitle_duration_ms);
                                 info!(text = %text, "transcribed chunk");
                             }
                             Ok(Ok(_)) => {}

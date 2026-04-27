@@ -115,7 +115,11 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let web_addr = SocketAddr::new(bind_ip, cli.web_port);
-    tracing::info!("API token (Bearer): {token}", token = &api_token);
+    tracing::info!(
+        "API token (Bearer) ready: {} (full token via debug log)",
+        mask_token(&api_token)
+    );
+    tracing::debug!(token = %api_token, "API token (Bearer) full value");
     if app_config.network.lan_access {
         tracing::warn!(
             bind = %web_addr,
@@ -295,4 +299,39 @@ async fn main() -> anyhow::Result<()> {
 
     let _ = display_handle.join();
     Ok(())
+}
+
+/// Render the API token for human-readable startup logs without exposing the
+/// full secret. Keeps the leading and trailing 4 characters so an operator
+/// can still cross-reference against a saved value, but the middle is hidden.
+/// The full token is only emitted at `debug` level for explicit opt-in.
+fn mask_token(t: &str) -> String {
+    let chars: Vec<char> = t.chars().collect();
+    let n = chars.len();
+    if n <= 8 {
+        return "*".repeat(n);
+    }
+    let head: String = chars.iter().take(4).collect();
+    let tail: String = chars.iter().skip(n - 4).collect();
+    format!("{head}…{tail}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mask_token;
+
+    #[test]
+    fn mask_short_token_is_fully_starred() {
+        assert_eq!(mask_token(""), "");
+        assert_eq!(mask_token("abcd"), "****");
+        assert_eq!(mask_token("12345678"), "********");
+    }
+
+    #[test]
+    fn mask_long_token_keeps_head_and_tail() {
+        let m = mask_token("ABCD1234567890wxyz");
+        assert!(m.starts_with("ABCD"), "got {m:?}");
+        assert!(m.ends_with("wxyz"), "got {m:?}");
+        assert!(!m.contains("1234567890"));
+    }
 }
