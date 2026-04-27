@@ -149,12 +149,18 @@ async fn main() -> anyhow::Result<()> {
     // ── Session replay controller (shared with the REST API) ────────────────
     let replay = features::session_replay::SessionPlaybackController::new(frame_bus.clone());
 
+    // ── Display state (shared with dispatch handlers) ───────────────────────
+    let display_state = std::sync::Arc::new(std::sync::Mutex::new(
+        features::display_state::DisplayState::new(),
+    ));
+
     // ── Display window (OS thread) ──────────────────────────────────────────
-    // Spawned after recorder/replay exist so the title bar's activity
-    // indicator can read their state on every frame.
+    // Spawned after recorder/replay/display_state exist so the title bar's
+    // activity indicator and zoom transform can read state every frame.
     let display_bus = frame_bus.clone();
     let display_recorder = recorder.clone();
     let display_replay = replay.clone();
+    let display_state_for_window = display_state.clone();
     let pip = cli.pip;
     let display_handle = std::thread::spawn(move || {
         features::display::run_display(
@@ -162,6 +168,7 @@ async fn main() -> anyhow::Result<()> {
             pip,
             display_recorder,
             display_replay,
+            display_state_for_window,
         );
     });
 
@@ -186,6 +193,7 @@ async fn main() -> anyhow::Result<()> {
         recorder: recorder.clone(),
         replay: replay.clone(),
         dashboard_url,
+        display: display_state.clone(),
     });
 
     // ── Web dashboard ───────────────────────────────────────────────────────

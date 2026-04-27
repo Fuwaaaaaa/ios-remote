@@ -11,6 +11,7 @@ pub mod custom_cursor;
 pub mod design_overlay;
 pub mod device_frame;
 pub mod display;
+pub mod display_state;
 pub mod frame_analysis;
 pub mod game_mode;
 pub mod gestures;
