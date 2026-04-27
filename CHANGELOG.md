@@ -8,7 +8,7 @@ project uses [Semantic Versioning](https://semver.org/).
 
 The big v0.6 theme is **dispatch unification** — REST, Stream Deck, and
 hotkeys all flow through a single `command_palette::execute` surface.
-**23 of 35 Command Palette actions** dispatch live; the rest return a
+**22 of 33 Command Palette actions** dispatch live; the rest return a
 structured `409 not_dispatchable` with a clear "phase" reason so the
 gaps are honest and easy to plan against.
 
@@ -33,7 +33,7 @@ gaps are honest and easy to plan against.
   runtime dependency (seam added via `with_ffmpeg_bin` for testability).
   Seeking while playing is rejected — callers pause, seek, then resume.
 - **Command Palette dispatch** — `command_palette::execute(action_id, &ApiState)`
-  is the single dispatch surface for the 35 Command Palette actions. Wired
+  is the single dispatch surface for the 33 Command Palette actions. Wired
   this release: screenshot, screenshot_clipboard, record_start, record_stop,
   ocr, ocr_clipboard, ai_describe, qr_scan, check_update, startup_toggle,
   quit, web_dashboard, settings, firewall_setup, translate, zoom_in,
@@ -79,7 +79,7 @@ gaps are honest and easy to plan against.
   and `Arc<Mutex<DisplayState>>` so the title bar's activity indicator and
   the zoom transform / pending-action handler can read state every frame.
 - **README** — adds a Command Palette dispatch section documenting the
-  REST status codes and the 23/35 action count, plus Stream Deck and
+  REST status codes and the 22/33 action count, plus Stream Deck and
   Activity Indicator subsections.
 
 ### Deferred to a follow-up

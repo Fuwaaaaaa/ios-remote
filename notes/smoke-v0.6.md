@@ -28,7 +28,7 @@ iTunes installed.
 
 ## Command Palette dispatch
 
-8. [ ] `…/api/commands` → 200 + 35 commands.
+8. [ ] `…/api/commands` → 200 + 33 commands.
 9. [ ] `…/api/command/screenshot` → 200, file saved.
 10. [ ] `…/api/command/zoom_in` → 200; display visibly zooms.
        Repeat → zoom level grows. `…/api/command/zoom_reset` → 1.0x.
