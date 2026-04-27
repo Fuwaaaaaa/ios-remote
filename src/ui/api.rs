@@ -361,10 +361,7 @@ async fn list_commands() -> Json<serde_json::Value> {
 ///   recoverable failure like "no recording in progress")
 /// - 503 Service Unavailable: no frame received yet (analysis commands)
 /// - 500 Internal Server Error: handler ran but failed
-async fn run_command(
-    State(state): State<Arc<ApiState>>,
-    Path(id): Path<String>,
-) -> Response {
+async fn run_command(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Response {
     use crate::devtools::command_palette::{CommandError, execute};
 
     // Quit short-circuits the process — log and return 202 before exit so the

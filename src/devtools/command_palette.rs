@@ -304,7 +304,10 @@ pub fn execute(action_id: &str, state: &ApiState) -> Result<CommandResult, Comma
     match action_id {
         // ── Capture ─────────────────────────────────────────────────────────
         "screenshot" => {
-            let frame = state.frame_bus.latest_frame().ok_or(CommandError::NoFrame)?;
+            let frame = state
+                .frame_bus
+                .latest_frame()
+                .ok_or(CommandError::NoFrame)?;
             let path = crate::features::screenshot::save_frame(&frame).map_err(|m| {
                 CommandError::Failed {
                     action: "screenshot".into(),
@@ -347,7 +350,10 @@ pub fn execute(action_id: &str, state: &ApiState) -> Result<CommandResult, Comma
 
         // ── Analysis ────────────────────────────────────────────────────────
         "ocr" => {
-            let frame = state.frame_bus.latest_frame().ok_or(CommandError::NoFrame)?;
+            let frame = state
+                .frame_bus
+                .latest_frame()
+                .ok_or(CommandError::NoFrame)?;
             let text = crate::features::ocr::extract_text(&frame, None).map_err(|m| {
                 CommandError::Failed {
                     action: "ocr".into(),
@@ -357,17 +363,22 @@ pub fn execute(action_id: &str, state: &ApiState) -> Result<CommandResult, Comma
             Ok(CommandResult::ok("ocr", text))
         }
         "ocr_clipboard" => {
-            let text = crate::features::clipboard_sync::copy_screen_text_to_clipboard(
-                &state.frame_bus,
-            )
-            .map_err(|m| CommandError::Failed {
-                action: "ocr_clipboard".into(),
-                message: m,
-            })?;
-            Ok(CommandResult::ok("ocr_clipboard", format!("copied: {text}")))
+            let text =
+                crate::features::clipboard_sync::copy_screen_text_to_clipboard(&state.frame_bus)
+                    .map_err(|m| CommandError::Failed {
+                        action: "ocr_clipboard".into(),
+                        message: m,
+                    })?;
+            Ok(CommandResult::ok(
+                "ocr_clipboard",
+                format!("copied: {text}"),
+            ))
         }
         "ai_describe" => {
-            let frame = state.frame_bus.latest_frame().ok_or(CommandError::NoFrame)?;
+            let frame = state
+                .frame_bus
+                .latest_frame()
+                .ok_or(CommandError::NoFrame)?;
             let desc = crate::features::ai_vision::describe_screen(&frame, None).map_err(|m| {
                 CommandError::Failed {
                     action: "ai_describe".into(),
@@ -377,7 +388,10 @@ pub fn execute(action_id: &str, state: &ApiState) -> Result<CommandResult, Comma
             Ok(CommandResult::ok("ai_describe", desc))
         }
         "qr_scan" => {
-            let frame = state.frame_bus.latest_frame().ok_or(CommandError::NoFrame)?;
+            let frame = state
+                .frame_bus
+                .latest_frame()
+                .ok_or(CommandError::NoFrame)?;
             let codes = crate::features::qr_scanner::scan_qr_codes(&frame);
             let msg = if codes.is_empty() {
                 "no QR codes found".to_string()
@@ -514,7 +528,10 @@ pub fn execute(action_id: &str, state: &ApiState) -> Result<CommandResult, Comma
             ))
         }
         "translate" => {
-            let frame = state.frame_bus.latest_frame().ok_or(CommandError::NoFrame)?;
+            let frame = state
+                .frame_bus
+                .latest_frame()
+                .ok_or(CommandError::NoFrame)?;
             let mut overlay = crate::features::translation::TranslationOverlay::new("en", "ja");
             let pairs = overlay
                 .translate_frame(&frame)
@@ -707,6 +724,9 @@ mod tests {
 
         execute("zoom_reset", &state).expect("zoom_reset");
         let level = state.display.lock().unwrap().zoom.level;
-        assert!((level - 1.0).abs() < 1e-6, "expected reset to 1.0, got {level}");
+        assert!(
+            (level - 1.0).abs() < 1e-6,
+            "expected reset to 1.0, got {level}"
+        );
     }
 }
