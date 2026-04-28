@@ -25,6 +25,13 @@ whisper = ["whisper-rs", "audio_capture"]
 # compiler scrutiny without bloating default builds. See docs/ROADMAP-v0.6.md
 # §68-feature stocktake. Candidates for promotion or deletion as usage emerges.
 experimental = []
+# iOS 17+ support via the `idevice` crate (jkcoxson). Adds Pair record
+# read + StartSession + TLS upgrade so screenshotr / future services can
+# work on iOS 17 / 18 / 26+ where the legacy direct-StartService path
+# fails. Default builds keep targeting iOS ≤16 only — opt in with
+# `--features ios17`. See docs/PHASE2-ios17.md (TBD) and the plan at
+# %USERPROFILE%\.claude\plans\crystalline-seeking-naur.md.
+ios17 = ["dep:idevice"]
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -64,3 +71,11 @@ whisper-rs = { version = "0.11", optional = true }
 
 # WASAPI loopback / mic capture (optional) — enable with --features audio_capture
 cpal = { version = "0.15", optional = true }
+
+# idevice (libimobiledevice port, pure Rust) — enable with --features ios17.
+# Pinned exactly because the crate's README warns that breaking changes
+# happen at each 0.1.x point release until 0.2.0. `aws-lc` ships prebuilt
+# on Windows-MSVC (no vcpkg / OpenSSL build). `screenshotr` gates the only
+# service we currently use; defer tunneld/core_device_proxy/mobile_image_mounter
+# until DDI / iOS 18+ work begins (see Stage C-4..C-7 in the plan).
+idevice = { version = "=0.1.58", default-features = false, features = ["usbmuxd", "tcp", "aws-lc", "screenshotr"], optional = true }

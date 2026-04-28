@@ -1,5 +1,7 @@
 pub mod device;
 pub mod diag;
+#[cfg(feature = "ios17")]
+pub mod idevice_bridge;
 pub mod lockdown;
 pub mod screen_capture;
 pub mod usbmuxd;

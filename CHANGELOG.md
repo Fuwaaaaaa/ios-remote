@@ -21,6 +21,15 @@ project uses [Semantic Versioning](https://semver.org/).
   that iOS 17+ requires for screenshotr. The warning makes the failure
   mode explicit instead of looping silently with a misleading
   "USB session ended — will retry".
+- **iOS 17+ Phase 2 scaffolding (`--features ios17`).** Optional Cargo
+  feature pulls in the `idevice` crate (jkcoxson, pure Rust, `=0.1.58`
+  pinned) with `usbmuxd + tcp + aws-lc + screenshotr` features, plus a
+  new `usb::idevice_bridge` adapter exposing
+  `connect_by_udid → device_info / start_service` over Pair record +
+  StartSession + TLS. Default builds are unaffected. The bridge is not
+  yet wired into the runtime path; routing in `mod.rs` and the iOS 17+
+  capture loop land in a follow-up after `--diag` results from real
+  hardware confirm which services need re-routing.
 
 ### Changed
 - **Lockdownd StartService failures dump the full response.**
