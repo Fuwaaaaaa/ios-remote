@@ -14,9 +14,13 @@ use idevice::IdeviceService;
 use idevice::lockdown::LockdownClient;
 use idevice::provider::IdeviceProvider;
 use idevice::usbmuxd::{Connection, UsbmuxdAddr, UsbmuxdConnection};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
+
+use crate::features::FrameBus;
 
 use super::lockdown::{DeviceInfo, ServiceInfo};
+
+const SCREENSHOTR_SERVICE: &str = "com.apple.mobile.screenshotr";
 
 /// Adapter around `idevice::lockdown::LockdowndClient`. Holds a live
 /// lockdown session (post-StartSession + TLS) bound to one device.
@@ -130,5 +134,60 @@ impl IdeviceBridge {
                 Err(anyhow::anyhow!("GetValue {key} returned non-string"))
             }
         }
+    }
+}
+
+/// iOS 17+ entry point — Stage C-6 dispatch target.
+///
+/// Connect via the bridge (Pair record + StartSession + TLS upgrade),
+/// double-check device info, and probe `screenshotr`. Each step is logged
+/// individually so a real-device test surfaces exactly how far the bridge
+/// got — even without `--diag`. The actual frame loop over the TLS-wrapped
+/// service socket is Stage C-7 and is not implemented yet, so this function
+/// always returns `Err` (with a different message for "probe succeeded but
+/// no v2 capture loop" vs "probe failed at step X").
+pub async fn run_v2(dev_info: &DeviceInfo, _frame_bus: &FrameBus) -> anyhow::Result<()> {
+    info!(
+        udid = %dev_info.udid,
+        ios = %dev_info.ios_version,
+        model = %dev_info.model,
+        "iOS 17+ bridge path activated (`--features ios17`)"
+    );
+
+    let mut bridge = IdeviceBridge::connect_by_udid(&dev_info.udid, "ios-remote")
+        .await
+        .context("idevice bridge connect_by_udid")?;
+
+    match bridge.device_info().await {
+        Ok(info) => info!(
+            name = %info.name,
+            model = %info.model,
+            ios = %info.ios_version,
+            "Bridge device_info via TLS-wrapped lockdownd: OK"
+        ),
+        Err(e) => warn!(error = %e, "Bridge device_info failed (non-fatal probe)"),
+    }
+
+    match bridge.start_service(SCREENSHOTR_SERVICE).await {
+        Ok(svc) => {
+            warn!(
+                port = svc.port,
+                ssl = svc.enable_ssl,
+                "screenshotr start_service succeeded via bridge — but the v2 \
+                 capture loop is not implemented yet (Stage C-7). Stop the \
+                 process and report this success in the issue tracker."
+            );
+            anyhow::bail!(
+                "iOS 17+ bridge reached start_service('{}') = (port={}, ssl={}); \
+                 v2 capture loop not yet implemented",
+                SCREENSHOTR_SERVICE,
+                svc.port,
+                svc.enable_ssl,
+            )
+        }
+        Err(e) => Err(e).context(format!(
+            "iOS 17+ bridge start_service('{SCREENSHOTR_SERVICE}') — likely needs \
+             Personalized DDI mount (Stage C-5) or a different service path"
+        )),
     }
 }

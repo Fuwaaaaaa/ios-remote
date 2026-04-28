@@ -26,10 +26,15 @@ project uses [Semantic Versioning](https://semver.org/).
   pinned) with `usbmuxd + tcp + aws-lc + screenshotr` features, plus a
   new `usb::idevice_bridge` adapter exposing
   `connect_by_udid → device_info / start_service` over Pair record +
-  StartSession + TLS. Default builds are unaffected. The bridge is not
-  yet wired into the runtime path; routing in `mod.rs` and the iOS 17+
-  capture loop land in a follow-up after `--diag` results from real
-  hardware confirm which services need re-routing.
+  StartSession + TLS. Default builds are unaffected.
+- **iOS 17+ runtime routing.** With `--features ios17`, the capture loop
+  routes iOS 17+ devices through the bridge: Pair record fetch,
+  StartSession + TLS upgrade, and a `screenshotr` `start_service` probe
+  are exercised on real hardware. The actual frame loop over the
+  TLS-wrapped service socket (Stage C-7) is not yet implemented — the
+  probe always returns `Err` so the existing retry path kicks in, but
+  every step logs its result so a live device surfaces exactly how far
+  the bridge gets, without needing a manual `--diag` invocation.
 
 ### Changed
 - **Lockdownd StartService failures dump the full response.**

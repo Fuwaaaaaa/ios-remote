@@ -41,17 +41,33 @@ pub async fn capture_loop(
         *slot = Some(dev_info.clone());
     }
 
-    if let Some(major) = super::lockdown::parse_ios_major(&dev_info.ios_version)
-        && major >= 17
-    {
+    let is_ios17_plus = matches!(
+        super::lockdown::parse_ios_major(&dev_info.ios_version),
+        Some(m) if m >= 17
+    );
+
+    if is_ios17_plus {
+        #[cfg(not(feature = "ios17"))]
         warn!(
             ios = %dev_info.ios_version,
             model = %dev_info.model,
             "iOS 17+ detected. screenshotr requires Developer Mode + Personalized DDI mounted via \
              RemoteXPC tunnel + lockdownd StartSession/TLS handshake — none of which are \
-             implemented in this build. Expect StartService to fail. \
+             implemented in this build. Expect StartService to fail. Rebuild with \
+             `cargo build --release --features ios17` to try the experimental idevice bridge. \
              See README 'Supported iOS versions' for status."
         );
+
+        #[cfg(feature = "ios17")]
+        {
+            info!(
+                ios = %dev_info.ios_version,
+                model = %dev_info.model,
+                "iOS 17+ detected — routing to idevice bridge (Stage C-6 / `--features ios17`)"
+            );
+            drop(lockdown);
+            return super::idevice_bridge::run_v2(&dev_info, &frame_bus).await;
+        }
     }
 
     let service = lockdown
