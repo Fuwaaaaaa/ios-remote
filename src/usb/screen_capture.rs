@@ -1,7 +1,9 @@
+use super::lockdown::DeviceInfo;
 use super::usbmuxd::UsbmuxdClient;
 use crate::features::{Frame, FrameBus};
 use image::ImageDecoder;
 use image::codecs::png::PngDecoder;
+use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{info, warn};
 
@@ -23,6 +25,7 @@ pub async fn capture_loop(
     mux: &mut UsbmuxdClient,
     device_id: u32,
     frame_bus: FrameBus,
+    last_device: Arc<Mutex<Option<DeviceInfo>>>,
 ) -> anyhow::Result<()> {
     // Start screenshotr service via lockdownd
     let mut lockdown = super::lockdown::LockdownClient::connect(mux, device_id).await?;
@@ -34,8 +37,34 @@ pub async fn capture_loop(
         ios = %dev_info.ios_version,
         "Device info"
     );
+    if let Ok(mut slot) = last_device.lock() {
+        *slot = Some(dev_info.clone());
+    }
 
-    let service = lockdown.start_service(SCREENSHOTR_SERVICE).await?;
+    if let Some(major) = super::lockdown::parse_ios_major(&dev_info.ios_version)
+        && major >= 17
+    {
+        warn!(
+            ios = %dev_info.ios_version,
+            model = %dev_info.model,
+            "iOS 17+ detected. screenshotr requires Developer Mode + Personalized DDI mounted via \
+             RemoteXPC tunnel + lockdownd StartSession/TLS handshake — none of which are \
+             implemented in this build. Expect StartService to fail. \
+             See README 'Supported iOS versions' for status."
+        );
+    }
+
+    let service = lockdown
+        .start_service(SCREENSHOTR_SERVICE)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "screenshotr start failed (iOS={}, model={}): {}",
+                dev_info.ios_version,
+                dev_info.model,
+                e
+            )
+        })?;
 
     // Connect to the screenshotr service port
     let mut ss_tunnel = UsbmuxdClient::connect().await?;

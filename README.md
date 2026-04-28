@@ -78,6 +78,22 @@ INFO  Web dashboard: http://127.0.0.1:8080
 - ❌ **macOS / Linux** — Not supported (`build.rs` rejects the build)
 - ❌ **AirPlay mode** — Removed in v0.4.0; USB Type-C only
 
+### Supported iOS versions
+
+| iOS | Status | Notes |
+|-----|--------|-------|
+| iOS 14 – 16 | ✅ Targeted | Classic usbmuxd → lockdownd → screenshotr path |
+| iOS 17 / 18 / 26+ | ❌ Not supported (yet) | screenshotr requires Developer Mode + Personalized Developer Disk Image mounted via RemoteXPC tunnel + lockdownd StartSession/TLS handshake. None of those are implemented in this build. The capture loop will fail with a `StartService` rejection from lockdownd. |
+
+If you need a quick read on what your specific device is returning, run:
+
+```
+ios-remote.exe --diag
+```
+
+The output (raw `GetValue` / `StartService` plist responses) is meant to
+be pasted verbatim into a bug report.
+
 ## Features
 
 ### Core — USB screen mirroring

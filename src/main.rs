@@ -67,6 +67,12 @@ struct Cli {
     /// Print the connected iPhone list and exit.
     #[arg(long)]
     list_devices: bool,
+
+    /// Run a one-shot diagnostic dump (usbmuxd + lockdownd + screenshotr probe)
+    /// and exit. Useful for debugging "Trust" / "screen does not display"
+    /// issues, especially on iOS 17+ devices.
+    #[arg(long)]
+    diag: bool,
 }
 
 #[tokio::main]
@@ -89,6 +95,11 @@ async fn main() -> anyhow::Result<()> {
     // ── Device listing short-circuit ────────────────────────────────────────
     if cli.list_devices {
         return usb::print_device_list().await;
+    }
+
+    // ── Diagnostic short-circuit ───────────────────────────────────────────
+    if cli.diag {
+        return usb::diag::run().await;
     }
 
     // ── Config + token ──────────────────────────────────────────────────────

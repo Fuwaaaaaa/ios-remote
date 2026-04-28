@@ -1,9 +1,12 @@
 pub mod device;
+pub mod diag;
 pub mod lockdown;
 pub mod screen_capture;
 pub mod usbmuxd;
 
 use crate::features::FrameBus;
+use lockdown::DeviceInfo;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{info, warn};
@@ -29,6 +32,9 @@ pub struct UsbReceiver {
     frame_bus: FrameBus,
     /// Preferred device UDID. If `None`, picks the first enumerated device.
     preferred_udid: Option<String>,
+    /// Most recently observed device info. Populated after each successful
+    /// lockdownd `GetValue` round-trip and used to enrich stall warnings.
+    last_device: Arc<Mutex<Option<DeviceInfo>>>,
 }
 
 impl UsbReceiver {
@@ -36,6 +42,7 @@ impl UsbReceiver {
         Self {
             frame_bus,
             preferred_udid: None,
+            last_device: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -69,10 +76,32 @@ impl UsbReceiver {
             match stall_logged_at {
                 None => stall_logged_at = Some(std::time::Instant::now()),
                 Some(t) if t.elapsed() > Duration::from_secs(30) => {
-                    warn!(
-                        "Still waiting for iPhone. Checklist: cable seated, \
-                         'Trust This Computer' tapped, Apple Mobile Device Service running."
-                    );
+                    let snapshot = self.last_device.lock().ok().and_then(|g| g.clone());
+                    let unsupported = snapshot
+                        .as_ref()
+                        .and_then(|d| lockdown::parse_ios_major(&d.ios_version))
+                        .map(|m| m >= 17)
+                        .unwrap_or(false);
+                    match snapshot {
+                        Some(d) if unsupported => warn!(
+                            udid = %d.udid,
+                            model = %d.model,
+                            ios = %d.ios_version,
+                            "Still waiting for iPhone. iOS 17+ is NOT supported by this build \
+                             (no Pairing/StartSession/TLS/DDI). Run `--diag` for details."
+                        ),
+                        Some(d) => warn!(
+                            udid = %d.udid,
+                            model = %d.model,
+                            ios = %d.ios_version,
+                            "Still waiting for iPhone (last seen). Checklist: cable seated, \
+                             'Trust This Computer' tapped, Apple Mobile Device Service running."
+                        ),
+                        None => warn!(
+                            "Still waiting for iPhone. Checklist: cable seated, \
+                             'Trust This Computer' tapped, Apple Mobile Device Service running."
+                        ),
+                    }
                     stall_logged_at = Some(std::time::Instant::now());
                 }
                 _ => {}
@@ -103,7 +132,13 @@ impl UsbReceiver {
 
         info!("Starting screen capture via USB...");
         let bus = self.frame_bus.clone();
-        screen_capture::capture_loop(&mut mux, device.device_id, bus).await
+        screen_capture::capture_loop(
+            &mut mux,
+            device.device_id,
+            bus,
+            Arc::clone(&self.last_device),
+        )
+        .await
     }
 
     fn pick_device<'a>(&self, devices: &'a [UsbDevice]) -> anyhow::Result<&'a UsbDevice> {

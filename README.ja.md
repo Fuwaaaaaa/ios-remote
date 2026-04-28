@@ -78,6 +78,21 @@ INFO  Web dashboard: http://127.0.0.1:8080
 - ❌ **macOS / Linux** — 未対応（`build.rs` が build を拒否します）
 - ❌ **AirPlay モード** — v0.4.0 で削除、USB Type-C 一本化
 
+### 対応 iOS バージョン
+
+| iOS | ステータス | 備考 |
+|------|----------|------|
+| iOS 14 – 16 | ✅ 対象 | 古典的な usbmuxd → lockdownd → screenshotr 経路 |
+| iOS 17 / 18 / 26 以降 | ❌ 未対応 | screenshotr が **Developer Mode 有効化＋ Personalized Developer Disk Image を RemoteXPC tunnel 経由で mount ＋ lockdownd の StartSession/TLS ハンドシェイク** を要求するようになり、現ビルドはいずれも未実装。`StartService` で lockdownd が拒否を返すため、画面は表示されません（iPhone 上で「信頼」をタップしても解決しません — 構造的非対応です）。 |
+
+iOS 17+ で「信用できるデバイス」エラーや画面非表示に遭遇した場合は、まず以下を実行して lockdownd の生レスポンスを取得してください:
+
+```
+ios-remote.exe --diag
+```
+
+出力（`GetValue` / `StartService` の生 plist レスポンス）はそのまま不具合報告に貼ってください。
+
 ## Features
 
 ### Core — USB画面ミラーリング
@@ -161,6 +176,7 @@ INFO  Web dashboard: http://127.0.0.1:8080
 |------|--------------|
 | `Cannot connect to usbmuxd` | iTunes / Apple Devices が起動し `AppleMobileDeviceService` が Windows サービスとして走っているか |
 | `No iPhone connected` | USB ケーブル、接続ポート、iPhone 側の「信頼」タップ |
+| 「信用できるデバイス」エラー / 「信頼」をタップしても画面が出ない | iOS 17 以降の構造的非対応の可能性が高いです。`ios-remote.exe --diag` で lockdownd レスポンスを確認してください。本ビルドは StartSession / TLS / DDI mount を未実装で、iPhone 上で「信頼」をタップしても挙動は変わりません。 |
 | 画面が固まる | USB-C ケーブルがデータ通信対応か（充電専用ケーブルでは動きません） |
 | 起動直後に自動再接続を繰り返す | `--list-devices` で UDID を確認し、`--device <UDID>` で固定 |
 | ブラウザで Web Dashboard に `401 Unauthorized` | 起動ログの API token を確認、URL 直打ちではなく `/` から開くかヘッダ付きで叩く |

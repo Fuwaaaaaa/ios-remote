@@ -4,6 +4,41 @@ All notable changes to this project are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **`--diag` one-shot diagnostic mode.** Walks the
+  usbmuxd → lockdownd → screenshotr chain on every connected device and
+  prints raw GetValue results plus the StartService XML response to
+  stdout, then exits. Designed to be run as
+  `ios-remote.exe --diag > diag.txt 2>&1` and pasted into an issue when
+  reporting "Trust" / "screen does not display" failures.
+- **iOS 17+ structural-incompatibility warning.** The capture loop and
+  the stall warning now flag iOS 17+ devices explicitly. This build
+  speaks the classic usbmuxd/lockdownd/screenshotr stack only — it does
+  *not* implement ReadPairRecord, StartSession, the post-session TLS
+  upgrade, or the Personalized Developer Disk Image mount via RemoteXPC
+  that iOS 17+ requires for screenshotr. The warning makes the failure
+  mode explicit instead of looping silently with a misleading
+  "USB session ended — will retry".
+
+### Changed
+- **Lockdownd StartService failures dump the full response.**
+  Previously only the `Error` field was surfaced; now `Error`,
+  `ErrorString`, `Domain`, and `Type` are logged structurally, and the
+  raw XML plist body is emitted at `debug` level. This turns the
+  long-standing "trust"-looking error into something actually
+  diagnosable.
+- **Stall warning now includes the most recent DeviceInfo** (UDID,
+  model, iOS version) and switches to the iOS 17+ guidance message when
+  the cached device is unsupported.
+
+### Notes
+- This release does *not* fix the underlying iOS 17+ incompatibility —
+  that requires implementing pairing/session/TLS plus a RemoteXPC
+  tunnel and PDI mount, or switching to a different transport
+  (QuickTime Sync over CoreMediaIO). Tracked for a future release.
+
 ## [0.7.1] — 2026-04-27
 
 Post-release security + correctness audit on v0.7.0. No new features;
