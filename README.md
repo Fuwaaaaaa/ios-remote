@@ -83,7 +83,29 @@ INFO  Web dashboard: http://127.0.0.1:8080
 | iOS | Status | Notes |
 |-----|--------|-------|
 | iOS 14 – 16 | ✅ Targeted | Classic usbmuxd → lockdownd → screenshotr path |
-| iOS 17 / 18 / 26+ | ❌ Not supported (yet) | screenshotr requires Developer Mode + Personalized Developer Disk Image mounted via RemoteXPC tunnel + lockdownd StartSession/TLS handshake. None of those are implemented in this build. The capture loop will fail with a `StartService` rejection from lockdownd. |
+| iOS 17 / 18 / 26+ | 🚧 Preview (`--features ios17`) | Default builds still fail at `StartService` (see below). Build with `--features ios17` to opt into the experimental [`idevice`](https://crates.io/crates/idevice) bridge — Pair record + StartSession + TLS upgrade + a `screenshotr` `start_service` probe run on real hardware. The actual frame loop over the TLS-wrapped socket (Stage **C-7**) is not implemented yet; on iOS 17+ devices this currently surfaces *exactly* how far the bridge gets and stops. |
+
+#### iOS 17+ status (v0.7.2 — 2026-05-01)
+
+| Stage | What it does | Status |
+|-------|--------------|--------|
+| C-1 .. C-3 | `--features ios17`, `idevice` crate dep, Pair / StartSession / TLS bridge adapter | ✅ Implemented |
+| C-6 | Runtime version detection routes iOS 17+ devices through the bridge | ✅ Implemented |
+| C-8 | `--diag` output gains an "iOS 17+ idevice bridge probe" section | ✅ Implemented |
+| C-4 | `CoreDeviceProxy` / `RemoteXPC` tunnel via the `idevice` crate's tunneld feature | ⛔ Blocked on iOS 17+ hardware |
+| C-5 | Personalized Developer Disk Image mount via `mobile_image_mounter` | ⛔ Blocked on iOS 17+ hardware |
+| C-7 | TLS-wrapped screenshotr frame capture loop (the part that actually shows pixels on iOS 17+) | ⛔ Blocked on C-4 / C-5 |
+
+**Default build (no `--features ios17`)** — Connect, lockdownd `GetValue`
+calls succeed, `StartService` for `screenshotr` is rejected, and a
+"structural-incompatibility" warning is logged with the iOS version and
+model. No frames flow.
+
+**Preview build (`cargo build --release --features ios17`)** — All of the
+above, plus the bridge runs Pair record fetch + `StartSession` + TLS
+upgrade + `start_service` probe; each step is logged with OK / FAILED.
+Until C-4 and C-5 ship, `start_service('com.apple.mobile.screenshotr')`
+is the expected failure surface and the retry loop will keep cycling.
 
 If you need a quick read on what your specific device is returning, run:
 
@@ -91,8 +113,14 @@ If you need a quick read on what your specific device is returning, run:
 ios-remote.exe --diag
 ```
 
-The output (raw `GetValue` / `StartService` plist responses) is meant to
-be pasted verbatim into a bug report.
+The output (raw `GetValue` / `StartService` plist responses, plus the
+iOS 17+ bridge probe section when built with `--features ios17`) is
+meant to be pasted verbatim into a bug report. With no iPhone attached
+the command exits cleanly after printing `usbmuxd connect FAILED` or
+`No iPhone connected.` — useful for verifying the binary itself runs.
+
+See [`docs/IOS17_BRIDGE.md`](docs/IOS17_BRIDGE.md) for the staging plan
+and the on-device check-list used to validate each stage.
 
 ## Features
 

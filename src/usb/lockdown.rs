@@ -273,6 +273,14 @@ mod tests {
             ("UNKNOWN", None),
             ("garbage", None),
             ("  17.5  ", Some(17)),
+            // Triplet at the iOS 17 boundary (existing "16.7.10" covers iOS ≤16
+            // triplets; this pins the dispatch threshold itself).
+            ("17.0.1", Some(17)),
+            // Alphanumeric trailing — only the leading digit run is consumed.
+            ("17abc", Some(17)),
+            // Non-space whitespace (tab + newline) must trim like the
+            // ASCII-space case above.
+            ("\t26.4\n", Some(26)),
         ];
         for (input, want) in cases {
             assert_eq!(parse_ios_major(input), want, "input={input:?}");

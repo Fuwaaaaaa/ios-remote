@@ -83,7 +83,22 @@ INFO  Web dashboard: http://127.0.0.1:8080
 | iOS | ステータス | 備考 |
 |------|----------|------|
 | iOS 14 – 16 | ✅ 対象 | 古典的な usbmuxd → lockdownd → screenshotr 経路 |
-| iOS 17 / 18 / 26 以降 | ❌ 未対応 | screenshotr が **Developer Mode 有効化＋ Personalized Developer Disk Image を RemoteXPC tunnel 経由で mount ＋ lockdownd の StartSession/TLS ハンドシェイク** を要求するようになり、現ビルドはいずれも未実装。`StartService` で lockdownd が拒否を返すため、画面は表示されません（iPhone 上で「信頼」をタップしても解決しません — 構造的非対応です）。 |
+| iOS 17 / 18 / 26 以降 | 🚧 プレビュー (`--features ios17`) | デフォルトビルドは依然として `StartService` で失敗します（下記参照）。`--features ios17` を付けてビルドすると実験的な [`idevice`](https://crates.io/crates/idevice) ブリッジに切り替わり、Pair record + StartSession + TLS upgrade + `screenshotr` `start_service` プローブまで実機で実行されます。TLS 経由のフレームキャプチャループ（Stage **C-7**）はまだ未実装で、iOS 17+ 実機ではブリッジが**どこまで進んだか**を正確に表示して停止します。 |
+
+#### iOS 17+ 状況 (v0.7.2 — 2026-05-01)
+
+| Stage | 内容 | 状態 |
+|-------|------|------|
+| C-1 .. C-3 | `--features ios17`、`idevice` クレート依存、Pair / StartSession / TLS ブリッジ | ✅ 実装済み |
+| C-6 | iOS バージョン検出によるブリッジへのランタイム振り分け | ✅ 実装済み |
+| C-8 | `--diag` に「iOS 17+ idevice bridge probe」セクション追加 | ✅ 実装済み |
+| C-4 | `idevice` クレートの tunneld 機能を使う `CoreDeviceProxy` / `RemoteXPC` トンネル | ⛔ iOS 17+ 実機が必要 |
+| C-5 | `mobile_image_mounter` 経由の Personalized Developer Disk Image mount | ⛔ iOS 17+ 実機が必要 |
+| C-7 | TLS でラップされた screenshotr フレームキャプチャループ（実画像が流れる部分） | ⛔ C-4 / C-5 待ち |
+
+**デフォルトビルド (`--features ios17` なし)** — 接続自体は通り、lockdownd の `GetValue` も成功しますが `StartService` で拒否され、iOS バージョンとモデル名を含む構造的非対応の警告が出ます。フレームは流れません。
+
+**プレビュービルド (`cargo build --release --features ios17`)** — 上記に加えて、ブリッジが Pair record fetch + `StartSession` + TLS upgrade + `start_service` プローブを実行し、各ステップを OK / FAILED でログします。C-4 と C-5 が出るまでは `start_service('com.apple.mobile.screenshotr')` で失敗するのが想定挙動で、リトライループが回り続けます。
 
 iOS 17+ で「信用できるデバイス」エラーや画面非表示に遭遇した場合は、まず以下を実行して lockdownd の生レスポンスを取得してください:
 
@@ -91,7 +106,9 @@ iOS 17+ で「信用できるデバイス」エラーや画面非表示に遭遇
 ios-remote.exe --diag
 ```
 
-出力（`GetValue` / `StartService` の生 plist レスポンス）はそのまま不具合報告に貼ってください。
+出力（`GetValue` / `StartService` の生 plist レスポンス、および `--features ios17` ビルドでは iOS 17+ ブリッジプローブセクション）はそのまま不具合報告に貼ってください。iPhone を接続していない場合でも `usbmuxd connect FAILED` か `No iPhone connected.` を出して即終了するので、バイナリ自体の動作確認にも使えます。
+
+ステージ進行と実機検証チェックリストは [`docs/IOS17_BRIDGE.md`](docs/IOS17_BRIDGE.md) を参照してください。
 
 ## Features
 

@@ -6,6 +6,20 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-05-01
+
+iOS 17+ Phase 2 — *offline-completable* milestone. Lands the
+opt-in `--features ios17` bridge (Pair record + StartSession + TLS
+upgrade + `screenshotr` `start_service` probe), wires version-based
+runtime dispatch, expands `--diag` to report the bridge probe, and
+backs the new code with the test surface that *can* be exercised
+without an iOS 17+ device. CoreDeviceProxy tunnel (C-4), Personalized
+DDI mount (C-5), and the TLS-wrapped frame capture loop (C-7) remain
+explicit stubs — those genuinely require a real iOS 17+ device to
+implement, so they are tracked for a follow-up release. Default builds
+(`cargo build --release` without `--features ios17`) are unchanged in
+behavior.
+
 ### Added
 - **`--diag` one-shot diagnostic mode.** Walks the
   usbmuxd → lockdownd → screenshotr chain on every connected device and
@@ -35,6 +49,15 @@ project uses [Semantic Versioning](https://semver.org/).
   probe always returns `Err` so the existing retry path kicks in, but
   every step logs its result so a live device surfaces exactly how far
   the bridge gets, without needing a manual `--diag` invocation.
+- **`--diag` iOS 17+ bridge section (`--features ios17`).** When run
+  against an iOS 17+ device, the diagnostic now adds an "iOS 17+
+  idevice bridge probe" section that walks `connect_by_udid` (Pair +
+  StartSession + TLS), `device_info` over the TLS-wrapped lockdownd,
+  and `start_service` for both `com.apple.mobile.screenshotr` and
+  `com.apple.instruments.dtservicehub`. Each step prints OK / FAILED
+  with the full anyhow context chain. DDI mount and CoreDeviceProxy
+  tunnel status are emitted as placeholders pending Stage C-5/C-4.
+  Default (non-`ios17`) builds are unaffected.
 
 ### Changed
 - **Lockdownd StartService failures dump the full response.**
@@ -46,12 +69,49 @@ project uses [Semantic Versioning](https://semver.org/).
 - **Stall warning now includes the most recent DeviceInfo** (UDID,
   model, iOS version) and switches to the iOS 17+ guidance message when
   the cached device is unsupported.
+- **`--diag` placeholder lines spell out the missing stage.** The
+  `DDI mount status` and `tunneld / CoreDeviceProxy status` rows now
+  name the missing implementation (`mobile_image_mounter` for C-5,
+  `idevice` crate's `tunneld` feature for C-4) so the diag output is
+  self-explanatory without cross-referencing the plan.
+- **`idevice_bridge::run_v2` failure context is more specific.**
+  `start_service('com.apple.mobile.screenshotr')` failures now name the
+  ordering of work that's required to make the call succeed
+  (`CoreDeviceProxy tunnel` (C-4) → `Personalized DDI mount` (C-5)),
+  rather than just "DDI mount or different service path".
+
+### Tests
+- Offline coverage for the iOS 17+ surface that *can* be tested without
+  an iPhone:
+  - `parse_ios_major` — added boundary cases (`"17.0.1"`, `"17abc"`,
+    `"\t26.4\n"`) that pin the dispatch threshold and exercise
+    whitespace / alphanumeric-trail handling.
+  - `screen_capture::is_ios17_plus` — extracted from the inline call
+    site and pinned with a tripwire test so changes to the threshold
+    fail loudly. Identical behavior in both `--features ios17` and
+    default builds.
+  - `idevice_bridge::IdeviceBridge::connect_by_udid` — graceful-failure
+    test using a bogus UDID; works on hosts with or without `usbmuxd`
+    running.
+  - `usb::diag::run` — invariant test that the future resolves to
+    `Ok(())` regardless of host state (no `usbmuxd`, `usbmuxd` + no
+    device, `usbmuxd` + device).
+
+### Docs
+- New `docs/IOS17_BRIDGE.md` — staging plan and on-device check-list
+  for Stage B (the next step once iOS 17+ hardware is available).
+- README `iOS 17+ status` section rewritten to cover the preview
+  build, the per-stage status table, and the expected `--diag` output
+  in each host state. Matching update in `README.ja.md`.
 
 ### Notes
-- This release does *not* fix the underlying iOS 17+ incompatibility —
-  that requires implementing pairing/session/TLS plus a RemoteXPC
-  tunnel and PDI mount, or switching to a different transport
-  (QuickTime Sync over CoreMediaIO). Tracked for a future release.
+- This release does *not* fix the underlying iOS 17+ incompatibility
+  end-to-end — frame capture on iOS 17+ still requires C-4
+  (CoreDeviceProxy tunnel) + C-5 (Personalized DDI mount) + C-7
+  (TLS-wrapped capture loop), all of which need a real iOS 17+ device
+  to implement. v0.7.2 lands the offline-completable scaffolding,
+  diagnostic surface, and test coverage; the hardware-blocked work is
+  the next milestone. See `docs/IOS17_BRIDGE.md`.
 
 ## [0.7.1] — 2026-04-27
 

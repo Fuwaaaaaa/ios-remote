@@ -41,10 +41,7 @@ pub async fn capture_loop(
         *slot = Some(dev_info.clone());
     }
 
-    let is_ios17_plus = matches!(
-        super::lockdown::parse_ios_major(&dev_info.ios_version),
-        Some(m) if m >= 17
-    );
+    let is_ios17_plus = is_ios17_plus(&dev_info.ios_version);
 
     if is_ios17_plus {
         #[cfg(not(feature = "ios17"))]
@@ -231,6 +228,16 @@ async fn recv_message(stream: &mut tokio::net::TcpStream) -> anyhow::Result<Vec<
     Ok(data)
 }
 
+/// True when `dev_info.ios_version` reports iOS 17 or newer. Used by
+/// `capture_loop` to decide between the legacy direct-StartService path
+/// (iOS ≤16) and the idevice bridge path (iOS 17+ / `--features ios17`).
+///
+/// Pulled out of the inline call site so it stays testable without a
+/// connected device — see `tests::dispatch_threshold_pins_at_ios_17`.
+fn is_ios17_plus(version: &str) -> bool {
+    matches!(super::lockdown::parse_ios_major(version), Some(m) if m >= 17)
+}
+
 /// Decode PNG bytes to RGBA pixel buffer.
 fn decode_png_to_rgba(png_data: &[u8]) -> anyhow::Result<(Vec<u8>, u32, u32)> {
     let cursor = std::io::Cursor::new(png_data);
@@ -252,4 +259,33 @@ fn decode_png_to_rgba(png_data: &[u8]) -> anyhow::Result<(Vec<u8>, u32, u32)> {
     }
 
     Ok((rgba, width, height))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_ios17_plus;
+
+    /// The iOS 17 threshold is the only thing that decides whether
+    /// `capture_loop` drops the legacy lockdownd session and routes through
+    /// the idevice bridge. Pinning it here means a future tweak to
+    /// `parse_ios_major` (or to the `>= 17` predicate) can't silently shift
+    /// the dispatch boundary. The test runs identically with or without
+    /// `--features ios17` — the threshold itself is feature-independent;
+    /// only what happens *after* the boolean is gated.
+    #[test]
+    fn dispatch_threshold_pins_at_ios_17() {
+        // Legacy path (iOS ≤16).
+        assert!(!is_ios17_plus("16.7.10"));
+        assert!(!is_ios17_plus("15.8.3"));
+        // Bridge path (iOS 17+).
+        assert!(is_ios17_plus("17.0"));
+        assert!(is_ios17_plus("17.0.1"));
+        assert!(is_ios17_plus("18.4"));
+        assert!(is_ios17_plus("26.0"));
+        // Unknown / unparseable version stays on the legacy path; the
+        // user-visible warning at the call site is the diagnosis surface.
+        assert!(!is_ios17_plus(""));
+        assert!(!is_ios17_plus("unknown"));
+        assert!(!is_ios17_plus("garbage"));
+    }
 }

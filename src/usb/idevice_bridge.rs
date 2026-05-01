@@ -146,6 +146,28 @@ impl IdeviceBridge {
 /// service socket is Stage C-7 and is not implemented yet, so this function
 /// always returns `Err` (with a different message for "probe succeeded but
 /// no v2 capture loop" vs "probe failed at step X").
+///
+/// **What Stage C-7 must add (frame capture loop):**
+/// 1. Re-connect to the screenshotr port returned by `start_service` over
+///    a fresh usbmuxd tunnel and re-do the TLS handshake using the same
+///    pair record (the `idevice` crate exposes a service-stream helper —
+///    do *not* hand-roll TLS).
+/// 2. Speak the DLMessage framing (`DLMessageVersionExchange` →
+///    `DLMessageProcessMessage` with `ScreenShotRequest`) — same wire
+///    format as the legacy `screen_capture::capture_loop`, just over the
+///    TLS-wrapped socket. The existing `send_dl_message` / `recv_message`
+///    helpers in `screen_capture.rs` can be reused once they are
+///    abstracted over `AsyncRead + AsyncWrite + Unpin`.
+/// 3. Decode the returned PNG and `frame_bus.publish(Frame { … })` —
+///    identical to the iOS ≤16 path.
+/// 4. Periodic FPS log + reconnect-on-error semantics matching
+///    `capture_loop`.
+///
+/// **Stages C-4 (CoreDeviceProxy tunnel) and C-5 (Personalized DDI mount)
+/// gate this on real iOS 17+ devices**: until they ship,
+/// `start_service('com.apple.mobile.screenshotr')` is expected to fail at
+/// the lockdownd level and the bridge can't even open the socket
+/// described in step 1. See `docs/IOS17_BRIDGE.md` for the staging order.
 pub async fn run_v2(dev_info: &DeviceInfo, _frame_bus: &FrameBus) -> anyhow::Result<()> {
     info!(
         udid = %dev_info.udid,
@@ -186,8 +208,36 @@ pub async fn run_v2(dev_info: &DeviceInfo, _frame_bus: &FrameBus) -> anyhow::Res
             )
         }
         Err(e) => Err(e).context(format!(
-            "iOS 17+ bridge start_service('{SCREENSHOTR_SERVICE}') — likely needs \
-             Personalized DDI mount (Stage C-5) or a different service path"
+            "iOS 17+ bridge start_service('{SCREENSHOTR_SERVICE}') — on iOS 17+ \
+             this service typically requires CoreDeviceProxy tunnel (Stage C-4) \
+             followed by Personalized DDI mount (Stage C-5) before lockdownd \
+             will hand it out; until both ship, this is the expected failure \
+             surface and the retry loop will keep cycling"
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::IdeviceBridge;
+
+    /// Without a real iPhone of the given UDID — and regardless of whether
+    /// usbmuxd happens to be running on the test host — `connect_by_udid`
+    /// must return `Err` and never panic. Two graceful-failure surfaces are
+    /// in scope: (1) no usbmuxd → "connect to local usbmuxd …" context, or
+    /// (2) usbmuxd present, no matching device → "Device … not connected
+    /// via USB". Both are acceptable; the invariant under test is that the
+    /// bridge does not crash on hardware-absence.
+    #[tokio::test]
+    async fn connect_by_udid_fails_gracefully_without_device() {
+        let result = IdeviceBridge::connect_by_udid(
+            "00000000-FFFFFFFFFFFFFFFF-NOT-A-REAL-UDID",
+            "ios-remote-test",
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "connect_by_udid must return Err for a bogus UDID; got Ok"
+        );
     }
 }
