@@ -78,6 +78,7 @@ INFO  Web dashboard: http://127.0.0.1:8080
 ### Platform support
 
 - ✅ **Windows 10 / 11** — Native
+- ✅ **No iPhone attached** — `--synthetic` runs the whole pipeline against a procedural mock screen. See §[Synthetic Mode](#synthetic-mode-no-iphone-required).
 - ❌ **macOS / Linux** — Not supported (`build.rs` rejects the build)
 - ❌ **AirPlay mode** — Removed in v0.4.0; USB Type-C only
 
@@ -86,7 +87,8 @@ INFO  Web dashboard: http://127.0.0.1:8080
 | iOS | Status | Notes |
 |-----|--------|-------|
 | iOS 14 – 16 | ✅ Targeted | Classic usbmuxd → lockdownd → screenshotr path |
-| iOS 17 / 18 / 26+ | 🚧 Preview (`--features ios17`) | Default builds still fail at `StartService` (see below). Build with `--features ios17` to opt into the experimental [`idevice`](https://crates.io/crates/idevice) bridge — Pair record + StartSession + TLS upgrade + a `screenshotr` `start_service` probe run on real hardware. The actual frame loop over the TLS-wrapped socket (Stage **C-7**) is not implemented yet; on iOS 17+ devices this currently surfaces *exactly* how far the bridge gets and stops. |
+| iOS 17 / 18 / 26+ | 🚧 Preview (`--features ios17`) | Default builds still fail at `StartService` (see below). Build with `--features ios17` to opt into the experimental [`idevice`](https://crates.io/crates/idevice) bridge — Pair record + StartSession + TLS upgrade + a `screenshotr` `start_service` probe run on real hardware. The actual frame loop over the TLS-wrapped socket (Stage **C-7**) is not implemented yet; on iOS 17+ devices this currently surfaces *exactly* how far the bridge gets and stops. **While Stage C-7 is blocked, use `--synthetic`** (see §[Synthetic Mode](#synthetic-mode-no-iphone-required)) to demo / develop against the rest of the app. |
+| No device | ✅ `--synthetic` | Procedural 390x844 iPhone-shaped mock screen at 30 FPS. Bypasses usbmuxd entirely. Display window / recording / screenshots / OCR / AI / replay / macros all work. v0.8.0+. |
 
 #### iOS 17+ status (v0.7.2 — 2026-05-01)
 
@@ -250,12 +252,14 @@ stats, screenshot, recording, subtitles, and the WDA stub in ~3 s.
 | Symptom | Things to check |
 |---------|------------------|
 | `Cannot connect to usbmuxd` | iTunes / Apple Devices installed and `AppleMobileDeviceService` running as a Windows service |
-| `No iPhone connected` | USB cable, port, the "Trust" tap on the iPhone |
+| `No iPhone connected` | USB cable, port, the "Trust" tap on the iPhone. **No iPhone to test with?** Run `--synthetic` instead — see §[Synthetic Mode](#synthetic-mode-no-iphone-required) |
 | Screen freezes | Whether the USB-C cable supports data (charge-only cables won't work) |
 | Endless reconnect right after launch | Run `--list-devices` and pin the UDID with `--device <UDID>` |
 | `401 Unauthorized` in the dashboard | Use the API token from the startup log; open the dashboard from `/` (it embeds the token) instead of typing API URLs |
 | `Failed to bind Web dashboard` | Pick a different port with `-w <PORT>` |
 | Multiple iPhones at once | One device at a time today; switch with `--device` |
+| `WDA not reachable` when running a macro | `--synthetic` ships a dummy WDA stub on `127.0.0.1:8101` for testing macros without WebDriverAgent; for real devices set up WDA per §[Macro setup](#macro-setup-sending-ios-input) |
+| iOS 17+ device, `StartService` for `screenshotr` fails | Stage C-7 (TLS screenshotr capture loop) is not implemented — see §[Supported iOS versions](#supported-ios-versions). Use `--synthetic` for development in the meantime |
 
 ## Macro setup (sending iOS input)
 
@@ -268,6 +272,8 @@ stats, screenshot, recording, subtitles, and the WDA stub in ~3 s.
 5. Trigger macros via `POST /api/macros/run` or the `F7` hotkey
 
 If WDA isn't running, `Tap` / `Swipe` / `LongPress` actions return errors but the process won't crash — `Wait` and `Screenshot` actions keep working.
+
+> **Testing macros without WDA?** `--synthetic` automatically points `IOS_REMOTE_WDA_URL` at a dummy WDA stub on `127.0.0.1:8101` that accepts `/session`, `/tap/0`, `/dragfromtoforduration`, `/touchAndHold` and answers with HTTP 200. Inputs are logged to stdout so you can verify the macro engine actually fired the call, without needing a developer-signed WDA build. Override the port with `--synthetic-wda-port <PORT>` if 8101 is in use.
 
 ## Session Replay
 
@@ -512,6 +518,11 @@ src/
 │   ├── network_diag.rs   Network diagnostics
 │   ├── timeline.rs       Event timeline
 │   └── throttle.rs       Bandwidth control
+├── synthetic/           --synthetic mode (no iPhone required, v0.8.0+)
+│   ├── mod.rs           Entry, SyntheticDeviceInfo, task spawn
+│   ├── renderer.rs      30 FPS iPhone-shaped mock screen renderer
+│   ├── subtitle_pump.rs 5s-tick synthetic subtitle pusher
+│   └── wda_stub.rs      Dummy WebDriverAgent on 127.0.0.1:8101
 └── idevice/             USB device integration (stubs)
     ├── device_info.rs     Device info
     ├── file_transfer.rs   File transfer (AFC)

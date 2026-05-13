@@ -78,6 +78,7 @@ INFO  Web dashboard: http://127.0.0.1:8080
 ### 対応状況
 
 - ✅ **Windows 10 / 11** — ネイティブ対応
+- ✅ **実機 iPhone なし** — `--synthetic` でパイプライン全体を擬似画面で動かせます。§[Synthetic モード](#synthetic-モード-実機なし動作) を参照。
 - ❌ **macOS / Linux** — 未対応（`build.rs` が build を拒否します）
 - ❌ **AirPlay モード** — v0.4.0 で削除、USB Type-C 一本化
 
@@ -86,7 +87,8 @@ INFO  Web dashboard: http://127.0.0.1:8080
 | iOS | ステータス | 備考 |
 |------|----------|------|
 | iOS 14 – 16 | ✅ 対象 | 古典的な usbmuxd → lockdownd → screenshotr 経路 |
-| iOS 17 / 18 / 26 以降 | 🚧 プレビュー (`--features ios17`) | デフォルトビルドは依然として `StartService` で失敗します（下記参照）。`--features ios17` を付けてビルドすると実験的な [`idevice`](https://crates.io/crates/idevice) ブリッジに切り替わり、Pair record + StartSession + TLS upgrade + `screenshotr` `start_service` プローブまで実機で実行されます。TLS 経由のフレームキャプチャループ（Stage **C-7**）はまだ未実装で、iOS 17+ 実機ではブリッジが**どこまで進んだか**を正確に表示して停止します。 |
+| iOS 17 / 18 / 26 以降 | 🚧 プレビュー (`--features ios17`) | デフォルトビルドは依然として `StartService` で失敗します（下記参照）。`--features ios17` を付けてビルドすると実験的な [`idevice`](https://crates.io/crates/idevice) ブリッジに切り替わり、Pair record + StartSession + TLS upgrade + `screenshotr` `start_service` プローブまで実機で実行されます。TLS 経由のフレームキャプチャループ（Stage **C-7**）はまだ未実装で、iOS 17+ 実機ではブリッジが**どこまで進んだか**を正確に表示して停止します。**C-7 が完成するまでは `--synthetic`** (§[Synthetic モード](#synthetic-モード-実機なし動作)) で残りの機能をデモ／開発できます。 |
+| デバイスなし | ✅ `--synthetic` | 390x844 の iPhone 風モック画面を 30 FPS で生成。usbmuxd 経路は完全にバイパス。ディスプレイ／録画／スクリーンショット／OCR／AI／リプレイ／マクロが全部動作します。v0.8.0+。 |
 
 #### iOS 17+ 状況 (v0.7.2 — 2026-05-01)
 
@@ -236,13 +238,14 @@ recording / subtitles / WDA stub を約 3 秒で踏破します。
 | 症状 | 確認ポイント |
 |------|--------------|
 | `Cannot connect to usbmuxd` | iTunes / Apple Devices が起動し `AppleMobileDeviceService` が Windows サービスとして走っているか |
-| `No iPhone connected` | USB ケーブル、接続ポート、iPhone 側の「信頼」タップ |
-| 「信用できるデバイス」エラー / 「信頼」をタップしても画面が出ない | iOS 17 以降の構造的非対応の可能性が高いです。`ios-remote.exe --diag` で lockdownd レスポンスを確認してください。本ビルドは StartSession / TLS / DDI mount を未実装で、iPhone 上で「信頼」をタップしても挙動は変わりません。 |
+| `No iPhone connected` | USB ケーブル、接続ポート、iPhone 側の「信頼」タップ。**手元に iPhone がない場合**は `--synthetic` を使うと擬似画面で動作確認できます — §[Synthetic モード](#synthetic-モード-実機なし動作) |
+| 「信用できるデバイス」エラー / 「信頼」をタップしても画面が出ない | iOS 17 以降の構造的非対応の可能性が高いです。`ios-remote.exe --diag` で lockdownd レスポンスを確認してください。本ビルドは StartSession / TLS / DDI mount を未実装で、iPhone 上で「信頼」をタップしても挙動は変わりません。**Stage C-7 完成までは `--synthetic`** で開発を続けられます。 |
 | 画面が固まる | USB-C ケーブルがデータ通信対応か（充電専用ケーブルでは動きません） |
 | 起動直後に自動再接続を繰り返す | `--list-devices` で UDID を確認し、`--device <UDID>` で固定 |
 | ブラウザで Web Dashboard に `401 Unauthorized` | 起動ログの API token を確認、URL 直打ちではなく `/` から開くかヘッダ付きで叩く |
 | `Failed to bind Web dashboard` | `-w <PORT>` で別ポートを指定 |
 | 複数 iPhone を同時接続したい | 現時点では 1 台ずつ。`--device` で切り替え |
+| マクロ実行時に `WDA not reachable` | `--synthetic` ならダミー WDA スタブが `127.0.0.1:8101` に立つのでマクロが完走します。実機での入力送信は §[Macro setup](#macro-setup-ios-入力送信) を参照 |
 
 ## Macro setup (iOS 入力送信)
 
@@ -255,6 +258,8 @@ recording / subtitles / WDA stub を約 3 秒で踏破します。
 5. `POST /api/macros/run` か `F7` キーでマクロ実行
 
 WDA が起動していない場合、`Tap`/`Swipe`/`LongPress` アクションはエラーで返りますが、プロセスは落ちません（`Wait` や `Screenshot` アクションは引き続き動きます）。
+
+> **WDA なしでマクロをテストしたい場合は** `--synthetic` を使ってください。起動と同時に `IOS_REMOTE_WDA_URL` がダミー WDA スタブ (`127.0.0.1:8101`) に上書きされ、`/session` / `/tap/0` / `/dragfromtoforduration` / `/touchAndHold` に対して HTTP 200 を返します。入力内容は stdout にログ出力されるので、マクロエンジンが正しく発火したかを開発者署名 WDA なしで確認できます。ポートは `--synthetic-wda-port <PORT>` で変更可能。
 
 ## Session Replay
 
@@ -501,6 +506,11 @@ src/
 │   ├── network_diag.rs   Network diagnostics
 │   ├── timeline.rs       Event timeline
 │   └── throttle.rs       Bandwidth control
+├── synthetic/           --synthetic モード (実機 iPhone なし, v0.8.0+)
+│   ├── mod.rs           エントリ、SyntheticDeviceInfo、タスク spawn
+│   ├── renderer.rs      30 FPS iPhone 風モック画面レンダラ
+│   ├── subtitle_pump.rs 5秒周期で擬似字幕を Transcriber に push
+│   └── wda_stub.rs      ダミー WebDriverAgent (127.0.0.1:8101)
 └── idevice/             USB device integration (stubs)
     ├── device_info.rs     Device info
     ├── file_transfer.rs   File transfer (AFC)
