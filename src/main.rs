@@ -14,6 +14,7 @@ mod devtools;
 mod error;
 mod features;
 mod idevice;
+mod synthetic;
 mod system;
 mod ui;
 mod usb;
