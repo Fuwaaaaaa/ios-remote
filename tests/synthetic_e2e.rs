@@ -96,8 +96,14 @@ fn status_reports_synthetic_device_connected() {
     wait_until_ready(38080);
     let (code, body) = http_get("http://127.0.0.1:38080/api/status");
     assert_eq!(code, 200, "body={body}");
-    assert!(body.contains("connected"), "expected status=connected, body={body}");
-    assert!(body.contains("Synthetic"), "expected Synthetic device name, body={body}");
+    assert!(
+        body.contains("connected"),
+        "expected status=connected, body={body}"
+    );
+    assert!(
+        body.contains("Synthetic"),
+        "expected Synthetic device name, body={body}"
+    );
 }
 
 #[test]
@@ -119,7 +125,10 @@ fn screenshot_returns_a_path_when_frames_flow() {
     std::thread::sleep(Duration::from_millis(300));
     let (code, body) = http_post("http://127.0.0.1:38083/api/screenshot", "{}");
     assert_eq!(code, 200, "screenshot should succeed, body={body}");
-    assert!(body.contains("path") && body.contains(".png"), "got: {body}");
+    assert!(
+        body.contains("path") && body.contains(".png"),
+        "got: {body}"
+    );
 }
 
 #[test]

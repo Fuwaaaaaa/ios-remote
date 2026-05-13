@@ -182,11 +182,36 @@ fn maybe_draw_notification(rgba: &mut [u8], w: u32, h: u32, elapsed: Duration) {
     let msg = messages[idx];
     let banner_y = 100u32;
     let banner_h = 60u32;
-    fill_rect(rgba, w, h, 20, banner_y, w - 40, banner_h, [245, 245, 250, 255]);
+    fill_rect(
+        rgba,
+        w,
+        h,
+        20,
+        banner_y,
+        w - 40,
+        banner_h,
+        [245, 245, 250, 255],
+    );
     // dark border row
     fill_rect(rgba, w, h, 20, banner_y, w - 40, 1, [180, 180, 190, 255]);
-    fill_rect(rgba, w, h, 20, banner_y + banner_h - 1, w - 40, 1, [180, 180, 190, 255]);
-    draw_text(rgba, w, 32, banner_y + 10, "NOTIFICATION", [0x50, 0x50, 0x50]);
+    fill_rect(
+        rgba,
+        w,
+        h,
+        20,
+        banner_y + banner_h - 1,
+        w - 40,
+        1,
+        [180, 180, 190, 255],
+    );
+    draw_text(
+        rgba,
+        w,
+        32,
+        banner_y + 10,
+        "NOTIFICATION",
+        [0x50, 0x50, 0x50],
+    );
     draw_text(rgba, w, 32, banner_y + 30, msg, [0x14, 0x14, 0x14]);
 }
 
@@ -195,7 +220,16 @@ fn draw_frame_counter(rgba: &mut [u8], w: u32, h: u32, frame_no: u64) {
     let tw = text_width(&text);
     let x = w.saturating_sub(tw + 6);
     let y = h.saturating_sub(14);
-    fill_rect(rgba, w, h, x.saturating_sub(2), y.saturating_sub(2), tw + 4, 12, [0, 0, 0, 200]);
+    fill_rect(
+        rgba,
+        w,
+        h,
+        x.saturating_sub(2),
+        y.saturating_sub(2),
+        tw + 4,
+        12,
+        [0, 0, 0, 200],
+    );
     draw_text(rgba, w, x, y, &text, [0x78, 0xFF, 0x78]);
 }
 
@@ -266,7 +300,10 @@ mod tests {
                 }
             }
         }
-        assert!(diff > 0, "frame counter area should change between frames, diff={diff}");
+        assert!(
+            diff > 0,
+            "frame counter area should change between frames, diff={diff}"
+        );
     }
 
     #[test]
@@ -283,7 +320,10 @@ mod tests {
                 bright_count += 1;
             }
         }
-        assert!(bright_count > 40, "app grid row should have many bright pixels, got {bright_count}");
+        assert!(
+            bright_count > 40,
+            "app grid row should have many bright pixels, got {bright_count}"
+        );
     }
 
     #[test]

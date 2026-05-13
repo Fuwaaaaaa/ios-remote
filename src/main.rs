@@ -376,17 +376,17 @@ async fn main() -> anyhow::Result<()> {
 
         // Bridge synthetic subtitles → existing Transcriber (always Some in
         // synthetic mode — see the override above).
-        let subtitle_push: std::sync::Arc<dyn Fn(String) + Send + Sync> =
-            match transcriber.clone() {
-                Some(tr) => std::sync::Arc::new(move |text: String| {
-                    let mut guard = tr.lock().unwrap_or_else(|e| e.into_inner());
-                    let ts = guard.now_ms();
-                    // Overlap consecutive lines by 1s so the bar never blanks
-                    // between 5-second ticks (duration 6s, push every 5s).
-                    guard.add_subtitle(&text, ts, 6_000);
-                }),
-                None => std::sync::Arc::new(|_| {}),
-            };
+        let subtitle_push: std::sync::Arc<dyn Fn(String) + Send + Sync> = match transcriber.clone()
+        {
+            Some(tr) => std::sync::Arc::new(move |text: String| {
+                let mut guard = tr.lock().unwrap_or_else(|e| e.into_inner());
+                let ts = guard.now_ms();
+                // Overlap consecutive lines by 1s so the bar never blanks
+                // between 5-second ticks (duration 6s, push every 5s).
+                guard.add_subtitle(&text, ts, 6_000);
+            }),
+            None => std::sync::Arc::new(|_| {}),
+        };
 
         tracing::info!(
             udid = %info.udid,

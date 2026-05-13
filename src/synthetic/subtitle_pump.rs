@@ -47,7 +47,11 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(150)).await;
         handle.abort();
         let v = captured.lock().expect("lock");
-        assert!(!v.is_empty(), "expected ≥1 push within 150ms, got {}", v.len());
+        assert!(
+            !v.is_empty(),
+            "expected ≥1 push within 150ms, got {}",
+            v.len()
+        );
         assert!(
             LINES.contains(&v[0].as_str()),
             "first push should be one of LINES, got {}",
