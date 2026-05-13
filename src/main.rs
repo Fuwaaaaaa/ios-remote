@@ -74,6 +74,21 @@ struct Cli {
     /// issues, especially on iOS 17+ devices.
     #[arg(long)]
     diag: bool,
+
+    /// Synthetic device mode — run the entire pipeline without a real iPhone.
+    /// Spawns an iPhone-shaped mock screen at 30 FPS, a dummy WebDriverAgent
+    /// stub on 127.0.0.1:8101 (override with --synthetic-wda-port), and a
+    /// rotating subtitle pump. Useful for development, demos, CI smoke
+    /// tests, and as a fallback when iOS 17+ hardware is unavailable.
+    /// See notes/v0.8.0.md.
+    #[arg(long)]
+    synthetic: bool,
+
+    /// Override the dummy WDA stub bind port (only meaningful with
+    /// --synthetic). Defaults to 8101 so the production default of 8100
+    /// stays free for real iproxy-forwarded WDA.
+    #[arg(long, default_value_t = 8101)]
+    synthetic_wda_port: u16,
 }
 
 #[tokio::main]
@@ -220,6 +235,17 @@ async fn main() -> anyhow::Result<()> {
         std::sync::Arc<std::sync::Mutex<features::audio_transcription::Transcriber>>,
     > = None;
 
+    // In synthetic mode the subtitle pump needs a Transcriber even if audio
+    // capture was disabled or unbuilt. Synthesizing one here keeps
+    // /api/subtitles populated and the on-screen subtitle bar working.
+    let transcriber = if cli.synthetic && transcriber.is_none() {
+        Some(std::sync::Arc::new(std::sync::Mutex::new(
+            features::audio_transcription::Transcriber::new(),
+        )))
+    } else {
+        transcriber
+    };
+
     // ── Display window (OS thread) ──────────────────────────────────────────
     // Spawned after recorder/replay/display_state exist so the title bar's
     // activity indicator and zoom transform can read state every frame.
@@ -298,6 +324,85 @@ async fn main() -> anyhow::Result<()> {
     }
     #[cfg(not(feature = "stream_deck"))]
     let _ = &api_state; // silence the "only used when feature is on" lint
+
+    // ── Synthetic device mode (no iPhone required) ─────────────────────────
+    if cli.synthetic {
+        if cli.device.is_some() {
+            tracing::warn!("--device is ignored when --synthetic is set");
+        }
+
+        let info = synthetic::SyntheticDeviceInfo::default_iphone_15();
+
+        // Pre-populate stats so /api/status reports "connected" and the
+        // dashboard's Status card shows the synthetic device identity.
+        {
+            let mut stats = api_state.stats.lock().await;
+            stats.connected = true;
+            stats.device_name = info.name.clone();
+            stats.resolution = format!("{}x{}", info.width, info.height);
+            stats.fps = 30.0;
+        }
+
+        // Redirect macros REST → dummy WDA on the loopback port we're about
+        // to bind. This MUST happen before the stub spawn and before any
+        // call into WdaClient::default_wda_client().
+        let wda_addr: std::net::SocketAddr =
+            std::net::SocketAddr::from(([127, 0, 0, 1], cli.synthetic_wda_port));
+        // SAFETY: env::set_var is called once on the main thread before any
+        // worker reads IOS_REMOTE_WDA_URL. The Rust 2024 edition marks this
+        // unsafe because env reads from other threads are undefined without
+        // synchronization; we guarantee the ordering by setting before spawn.
+        unsafe {
+            std::env::set_var(
+                "IOS_REMOTE_WDA_URL",
+                format!("http://127.0.0.1:{}", cli.synthetic_wda_port),
+            );
+        }
+
+        // Bridge synthetic frames → existing FrameBus. Down-stream consumers
+        // (display, recording, screenshot, OCR, AI, replay) are unchanged.
+        let bus_for_frames = frame_bus.clone();
+        let frame_publish: std::sync::Arc<
+            dyn Fn(synthetic::renderer::SyntheticFrame) + Send + Sync,
+        > = std::sync::Arc::new(move |sf: synthetic::renderer::SyntheticFrame| {
+            bus_for_frames.publish(features::Frame {
+                width: sf.width,
+                height: sf.height,
+                rgba: sf.rgba,
+                timestamp_us: sf.timestamp_us,
+                h264_nalu: None,
+            });
+        });
+
+        // Bridge synthetic subtitles → existing Transcriber (always Some in
+        // synthetic mode — see the override above).
+        let subtitle_push: std::sync::Arc<dyn Fn(String) + Send + Sync> =
+            match transcriber.clone() {
+                Some(tr) => std::sync::Arc::new(move |text: String| {
+                    let mut guard = tr.lock().unwrap_or_else(|e| e.into_inner());
+                    let ts = guard.now_ms();
+                    // Overlap consecutive lines by 1s so the bar never blanks
+                    // between 5-second ticks (duration 6s, push every 5s).
+                    guard.add_subtitle(&text, ts, 6_000);
+                }),
+                None => std::sync::Arc::new(|_| {}),
+            };
+
+        tracing::info!(
+            udid = %info.udid,
+            wda = %wda_addr,
+            "Synthetic device mode — no iPhone required. \
+             Dashboard at http://127.0.0.1:{}",
+            cli.web_port
+        );
+
+        let _handles = synthetic::spawn(info, frame_publish, subtitle_push, wda_addr);
+
+        // Wait for the display window to close (Q/Esc/X). The synthetic
+        // background tasks are aborted on handle drop right after.
+        let _ = display_handle.join();
+        return Ok(());
+    }
 
     // ── iproxy supervisor (auto-tunnel for WebDriverAgent macros) ───────────
     // Held for the lifetime of main; on Ctrl+C the OS reaps the child along
