@@ -46,6 +46,9 @@ cargo run -- --device 00008120-001A2B3C4D5E6F78
 
 # LAN の他 PC からダッシュボードを使う（Bearer トークン必須）
 cargo run -- --lan
+
+# Synthetic モード — 実機 iPhone 不要 (下の §Synthetic モード 参照)
+cargo run --release -- --synthetic
 ```
 
 ### 初回起動時のログ
@@ -109,6 +112,47 @@ ios-remote.exe --diag
 出力（`GetValue` / `StartService` の生 plist レスポンス、および `--features ios17` ビルドでは iOS 17+ ブリッジプローブセクション）はそのまま不具合報告に貼ってください。iPhone を接続していない場合でも `usbmuxd connect FAILED` か `No iPhone connected.` を出して即終了するので、バイナリ自体の動作確認にも使えます。
 
 ステージ進行と実機検証チェックリストは [`docs/IOS17_BRIDGE.md`](docs/IOS17_BRIDGE.md) を参照してください。
+
+## Synthetic モード (実機なし動作)
+
+iPhone を物理接続しなくても ios-remote のパイプライン全体 — ディスプレイ
+窓・録画・スクリーンショット・OCR・AI ビジョン・Session Replay・REST
+API・マクロ・字幕 — を一通り動かせます。開発・デモ・CI、そして iOS 17+
+ハードウェアキャプチャ (Stage C-7) 実装中の代替として有用。
+
+```bash
+cargo run --release -- --synthetic
+# その後ブラウザで http://127.0.0.1:8080 を開く
+```
+
+起動時の挙動:
+
+- 33ms ごとに 390x844 の RGBA フレームを生成（黒のステータスバー＋
+  時計＋LTE＋100% バッテリー、ネイビー〜パープルのグラデーション壁紙、
+  4x6 カラーアプリアイコングリッド A–X、30 秒周期の通知バナー、
+  右下にフレームカウンタ）。
+- `/api/status` が `connected: true` を返し、device は
+  `Synthetic iPhone`、iOS `17.5`、UDID `SYNTHETIC-…`。
+- `/api/screenshot`, `/api/recording/start`, `/api/ocr`,
+  `/api/ai/describe`, `/api/replay/*` のいずれも実機モードと同じ挙動。
+- ダミー WebDriverAgent スタブが `127.0.0.1:8101` で待ち受けるので
+  `/api/macros/run` の tap/swipe も成功します（入力は実機に届かず
+  ログ出力のみ）。
+- `/api/subtitles` には 5 秒周期で英語プレースホルダ字幕が流れます。
+
+フラグの優先順位:
+
+| 組合せ | 挙動 |
+|---|---|
+| `--synthetic --device <UDID>` | `--device` は警告付きで無視。 |
+| `--synthetic --diag` | `--diag` が従来通り実行（synthetic は無視）。 |
+| `--synthetic --record` | 起動と同時に録画開始（H.264 出力には ffmpeg 必須／lifecycle 自体は ffmpeg なしでも 200）。 |
+| `--synthetic --lan` | Web ダッシュボードを `0.0.0.0` で公開（Bearer トークン必須）。 |
+| `--synthetic-wda-port <PORT>` | ダミー WDA のバインドポートを `8101` から変更可能。 |
+
+実機なし e2e スモーク: `cargo test --test synthetic_e2e --
+--test-threads=1`。バイナリを起動して status / stats / screenshot /
+recording / subtitles / WDA stub を約 3 秒で踏破します。
 
 ## Features
 

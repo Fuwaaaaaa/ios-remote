@@ -46,6 +46,9 @@ cargo run -- --device 00008120-001A2B3C4D5E6F78
 
 # Expose the dashboard on the LAN (Bearer token required)
 cargo run -- --lan
+
+# Synthetic mode — no iPhone required (see §Synthetic Mode below)
+cargo run --release -- --synthetic
 ```
 
 ### First launch
@@ -121,6 +124,49 @@ the command exits cleanly after printing `usbmuxd connect FAILED` or
 
 See [`docs/IOS17_BRIDGE.md`](docs/IOS17_BRIDGE.md) for the staging plan
 and the on-device check-list used to validate each stage.
+
+## Synthetic Mode (no iPhone required)
+
+Run the full pipeline — display window, recording, screenshots, OCR, AI
+vision, Session Replay, REST API, macros, subtitles — without plugging
+in a phone. Useful for development, demos, CI, and as a fallback while
+iOS 17+ hardware capture (Stage C-7) is in progress.
+
+```bash
+cargo run --release -- --synthetic
+# then open http://127.0.0.1:8080 in a browser
+```
+
+What happens:
+
+- A 390x844 RGBA frame is rendered every 33ms: black status bar with
+  clock + LTE + 100% battery, navy/purple gradient wallpaper, a 4x6
+  colored app icon grid (labels A–X), a rotating notification banner
+  every 30s, and a monotonic frame counter in the bottom-right corner.
+- `/api/status` returns `connected: true` with device `Synthetic iPhone`,
+  iOS `17.5`, UDID `SYNTHETIC-…`.
+- `/api/screenshot`, `/api/recording/start`, `/api/ocr`,
+  `/api/ai/describe`, `/api/replay/*` all behave exactly as in
+  real-device mode.
+- A dummy WebDriverAgent stub binds `127.0.0.1:8101`, so
+  `/api/macros/run` taps/swipes succeed (logged on stdout, no real input
+  is dispatched anywhere).
+- `/api/subtitles` is populated with a rotating English placeholder
+  every 5 s.
+
+Flag interactions:
+
+| Combination | Behavior |
+|---|---|
+| `--synthetic --device <UDID>` | `--device` is ignored with a warning. |
+| `--synthetic --diag` | `--diag` runs as before; `--synthetic` is skipped. |
+| `--synthetic --record` | Recording starts at launch (H.264 only if ffmpeg is installed; controller lifecycle works regardless). |
+| `--synthetic --lan` | Web dashboard exposed on `0.0.0.0`; bearer token still required. |
+| `--synthetic-wda-port <PORT>` | Change the dummy WDA bind port from `8101`. |
+
+End-to-end smoke (no hardware): `cargo test --test synthetic_e2e --
+--test-threads=1`. The suite spawns the binary and exercises status,
+stats, screenshot, recording, subtitles, and the WDA stub in ~3 s.
 
 ## Features
 

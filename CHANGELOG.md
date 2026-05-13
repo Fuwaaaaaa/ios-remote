@@ -6,6 +6,68 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-05-13
+
+Synthetic Device Mode — *no-iPhone-required* milestone. Lands a single
+`--synthetic` CLI flag that brings the entire ios-remote pipeline up
+end-to-end without any hardware attached. Designed so a fresh checkout
+on a phone-less machine (or a GitHub Actions runner) can immediately
+exercise the display window, recording, screenshot, OCR, AI vision,
+Session Replay, macros, and subtitle paths — and so iOS 17+ users who
+are blocked on Stage C-7 (TLS screenshotr capture loop) have a way to
+demo and develop against the rest of the app while that work lands.
+
+### Added
+- **`--synthetic` flag.** Bypasses the usbmuxd → lockdownd → screenshotr
+  chain entirely. Spawns a 30 FPS procedural renderer that draws a
+  390x844 iPhone-shaped mock screen: black status bar with clock + LTE +
+  100% battery, navy/purple gradient wallpaper, a 4x6 colored app icon
+  grid (labels A–X), a rotating notification banner every 30s, and a
+  monotonic frame counter in the bottom-right corner. Frames flow
+  through the existing `FrameBus`, so every consumer (display window,
+  recording controller, screenshot, OCR, AI vision, session replay,
+  Stream Deck dispatch) lights up without modification. `/api/status`
+  reports `connected: true` with device `Synthetic iPhone`, iOS `17.5`,
+  UDID `SYNTHETIC-…`; `/api/stats` reports `390x844 @ 30 FPS`.
+- **Dummy WebDriverAgent stub.** When `--synthetic` is on, a tiny
+  axum-based HTTP server binds `127.0.0.1:8101` and answers `/session`,
+  `/session/:id/wda/tap/0`, `/dragfromtoforduration`, and `/touchAndHold`
+  with HTTP 200 + the WDA-shaped `{"value": null}` body. Input is logged
+  for visibility. The macros REST path (`/api/macros/run`) returns
+  success instead of the usual "WDA not reachable" error. Port is
+  configurable with `--synthetic-wda-port`.
+- **Synthetic subtitles.** A 5-second pump pushes rotating English
+  placeholder lines through the existing `Transcriber` so the dashboard
+  Subtitles card and `/api/subtitles` are populated immediately. A
+  `Transcriber` is synthesized even when `audio_capture` is unbuilt or
+  disabled in config.
+- **End-to-end smoke suite.** `tests/synthetic_e2e.rs` spawns the binary
+  and exercises 7 scenarios (status / stats / screenshot / recording
+  lifecycle / subtitles populate / WDA stub `/status` / WDA stub
+  `/session` + `/tap/0`). Runs in ~3 s after the binary is built.
+
+### Changed
+- `mod synthetic;` added to `src/main.rs`; no changes to public surface
+  or to existing modules. The renderer reuses the 5x7 bitmap font and
+  `draw_text` helper already shipped in
+  `src/features/stats_overlay.rs` — no glyph table duplication, no new
+  dependencies.
+
+### Compatibility
+- Default builds (without `--synthetic`) keep v0.7.2 behavior verbatim,
+  including the "No iPhone connected" exponential-backoff retry loop.
+- `--synthetic --device <UDID>` warns and ignores `--device`.
+- `--synthetic --diag` runs `--diag` as before (synthetic is skipped).
+- `--synthetic --record` starts recording at launch. The H.264 payload
+  is empty without ffmpeg on PATH (same as v0.7.2 real-device behavior),
+  but the controller lifecycle and `/api/recording/*` endpoints succeed.
+
+### Skipped (intentional)
+- No new Cargo feature flag. `--synthetic` is always compiled in;
+  binary-size growth is ~80 KB.
+- No new dependencies. Everything reuses `axum`, `tokio`, `tracing`,
+  `serde_json`, `chrono` already in the tree.
+
 ## [0.7.2] — 2026-05-01
 
 iOS 17+ Phase 2 — *offline-completable* milestone. Lands the
