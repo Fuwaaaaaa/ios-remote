@@ -66,7 +66,10 @@ pub async fn run() -> anyhow::Result<()> {
 }
 
 async fn diag_one_device(device: &UsbDevice) {
-    println!("--- device {} ({}) ---", device.udid, device.connection_type);
+    println!(
+        "--- device {} ({}) ---",
+        device.udid, device.connection_type
+    );
 
     let mut mux = match UsbmuxdClient::connect().await {
         Ok(c) => c,
@@ -242,6 +245,21 @@ async fn diag_idevice_bridge(device: &UsbDevice) {
     println!();
 }
 
+fn render_value(v: &Value) -> String {
+    match v {
+        Value::String(s) => format!("\"{s}\""),
+        Value::Boolean(b) => format!("{b}"),
+        Value::Integer(i) => format!("{i}"),
+        Value::Real(r) => format!("{r}"),
+        Value::Data(d) => format!("<{} bytes of binary data>", d.len()),
+        Value::Date(_) => "<date>".to_string(),
+        Value::Uid(_) => "<uid>".to_string(),
+        Value::Array(a) => format!("<array len={}>", a.len()),
+        Value::Dictionary(d) => format!("<dict keys={}>", d.len()),
+        _ => "<unknown>".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::run;
@@ -265,20 +283,5 @@ mod tests {
         run()
             .await
             .expect("--diag must return Ok regardless of usbmuxd / device state");
-    }
-}
-
-fn render_value(v: &Value) -> String {
-    match v {
-        Value::String(s) => format!("\"{s}\""),
-        Value::Boolean(b) => format!("{b}"),
-        Value::Integer(i) => format!("{i}"),
-        Value::Real(r) => format!("{r}"),
-        Value::Data(d) => format!("<{} bytes of binary data>", d.len()),
-        Value::Date(_) => "<date>".to_string(),
-        Value::Uid(_) => "<uid>".to_string(),
-        Value::Array(a) => format!("<array len={}>", a.len()),
-        Value::Dictionary(d) => format!("<dict keys={}>", d.len()),
-        _ => "<unknown>".to_string(),
     }
 }

@@ -39,10 +39,7 @@ impl IdeviceBridge {
             .await
             .context("connect to local usbmuxd (Apple Mobile Device Service)")?;
 
-        let devices = usbmuxd
-            .get_devices()
-            .await
-            .context("usbmuxd ListDevices")?;
+        let devices = usbmuxd.get_devices().await.context("usbmuxd ListDevices")?;
 
         let dev = devices
             .into_iter()
@@ -110,7 +107,10 @@ impl IdeviceBridge {
             .start_service(name)
             .await
             .with_context(|| format!("idevice start_service('{name}')"))?;
-        info!(service = name, port, ssl, "Service started (idevice bridge)");
+        info!(
+            service = name,
+            port, ssl, "Service started (idevice bridge)"
+        );
         Ok(ServiceInfo {
             port,
             enable_ssl: ssl,
