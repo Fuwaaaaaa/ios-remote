@@ -2,3 +2,10 @@
 *.swp
 *.swo
 .DS_Store
+
+# Runtime artifacts (synthetic mode + real-device recording/screenshot output)
+/recordings/
+/screenshots/
+
+# Local per-machine config (committed example lives in docs)
+/ios-remote.toml

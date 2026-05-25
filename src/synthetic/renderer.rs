@@ -100,9 +100,9 @@ fn draw_status_bar(rgba: &mut [u8], w: u32, h: u32, elapsed: Duration) {
     // Clock — derived from elapsed so tests are deterministic. Real wall-clock
     // is fine too but we'd lose reproducibility.
     let secs = elapsed.as_secs();
-    let hh = 9 + (secs / 3600) % 24;
-    let mm = (41 + (secs / 60)) % 60;
-    let clock = format!("{:02}:{:02}", hh % 24, mm);
+    let hh = (9 + secs / 3600) % 24;
+    let mm = (41 + secs / 60) % 60;
+    let clock = format!("{:02}:{:02}", hh, mm);
     draw_text(rgba, w, 14, 18, &clock, [0xFF, 0xFF, 0xFF]);
     // "LTE" mid status bar
     draw_text(rgba, w, 100, 18, "LTE", [0xC8, 0xC8, 0xC8]);
