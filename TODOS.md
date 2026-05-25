@@ -105,6 +105,23 @@ are quality improvements to land in v0.8.1 or later.
   for v0.8.1 so review log, CHANGELOG bump, and tag creation are
   automated.
 
+### P3 — CI hygiene (2026-05-25)
+
+- **[P3] Bump `KyleMayes/install-llvm-action@v2.0.9` → `@v3` when published**
+  Currently pinned to v2.0.9. Upstream has no node24 release yet
+  (all v2.0.x use node20). GitHub Actions force-migrates to node24 on
+  2026-06-02 and removes node20 on 2026-09-16. Recheck the repo's
+  releases monthly; bump when `v3.x.y` ships and remove the version pin.
+  See `.github/workflows/test.yml:68`.
+
+- **[P3] Optionally pin `windows-latest` → `windows-2025`**
+  GitHub will redirect `windows-latest` to `windows-2025-vs2026` on
+  2026-06-15. The redirect is automatic and harmless for our build, but
+  an explicit pin makes runner choice deterministic and surfaces future
+  image upgrades as intentional changes rather than silent drift.
+  Affects `.github/workflows/test.yml:12,51` and
+  `.github/workflows/release.yml:14`.
+
 ### P3 — Future / iOS 17+ track (carried from CHANGELOG "Deferred")
 
 - **[P3] Stage C-7 — TLS-wrapped screenshotr capture loop on iOS 17+**

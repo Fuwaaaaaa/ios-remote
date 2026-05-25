@@ -12,7 +12,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -51,7 +51,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -63,7 +63,9 @@ jobs:
 
       - name: Install LLVM (for whisper-rs-sys / bindgen)
         id: install-llvm
-        uses: KyleMayes/install-llvm-action@v2
+        # v2.x is still on node20; upstream has no node24 release yet.
+        # Track upgrade in TODOS.md (P3) — bump to @v3 once published.
+        uses: KyleMayes/install-llvm-action@v2.0.9
         with:
           version: "17"
 
@@ -82,7 +84,7 @@ jobs:
     timeout-minutes: 10
     continue-on-error: true  # soft-fail: surface advisories, don't block merges
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Run cargo audit
