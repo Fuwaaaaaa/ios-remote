@@ -54,16 +54,18 @@ pub struct SyntheticHandles {
 }
 
 /// Spawn all synthetic background tasks. Caller must keep `SyntheticHandles`
-/// alive (or `Arc` it) for the duration of the run.
+/// alive for the duration of the run. The WDA listener is bound by the
+/// caller so port-in-use is a hard error reported by main before the
+/// `IOS_REMOTE_WDA_URL` redirect points at a dead socket.
 pub fn spawn(
     info: SyntheticDeviceInfo,
     frame_publish: std::sync::Arc<dyn Fn(renderer::SyntheticFrame) + Send + Sync>,
     subtitle_push: std::sync::Arc<dyn Fn(String) + Send + Sync>,
-    wda_bind_addr: std::net::SocketAddr,
+    wda_listener: tokio::net::TcpListener,
 ) -> SyntheticHandles {
     let frame_task = renderer::spawn_frame_loop(info.clone(), frame_publish);
     let subtitle_task = subtitle_pump::spawn(subtitle_push);
-    let wda_task = wda_stub::spawn(wda_bind_addr);
+    let wda_task = wda_stub::serve(wda_listener);
     SyntheticHandles {
         _frame_task: frame_task,
         _subtitle_task: subtitle_task,

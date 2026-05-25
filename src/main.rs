@@ -118,6 +118,22 @@ async fn main() -> anyhow::Result<()> {
         return usb::diag::run().await;
     }
 
+    // ── Synthetic-mode env redirect ─────────────────────────────────────────
+    // Must run BEFORE the web dashboard task spawns: macros REST handlers
+    // resolve `IOS_REMOTE_WDA_URL` per request via `default_wda_client()`,
+    // so a request landing between bind and set_var would otherwise route to
+    // the real-device default 8100 instead of the synthetic stub on 8101.
+    if cli.synthetic {
+        // SAFETY: this runs on the main thread before any tokio task spawns,
+        // so the Rust 2024 cross-thread env read UB doesn't apply.
+        unsafe {
+            std::env::set_var(
+                "IOS_REMOTE_WDA_URL",
+                format!("http://127.0.0.1:{}", cli.synthetic_wda_port),
+            );
+        }
+    }
+
     // ── Config + token ──────────────────────────────────────────────────────
     let mut app_config = config::AppConfig::load();
     if cli.lan {
@@ -343,21 +359,23 @@ async fn main() -> anyhow::Result<()> {
             stats.fps = 30.0;
         }
 
-        // Redirect macros REST → dummy WDA on the loopback port we're about
-        // to bind. This MUST happen before the stub spawn and before any
-        // call into WdaClient::default_wda_client().
+        // Bind the dummy WDA listener up-front so a port-in-use shows up as a
+        // hard error here (instead of leaving `IOS_REMOTE_WDA_URL` — which we
+        // set above — pointing at a dead socket or, worse, another listener).
         let wda_addr: std::net::SocketAddr =
             std::net::SocketAddr::from(([127, 0, 0, 1], cli.synthetic_wda_port));
-        // SAFETY: env::set_var is called once on the main thread before any
-        // worker reads IOS_REMOTE_WDA_URL. The Rust 2024 edition marks this
-        // unsafe because env reads from other threads are undefined without
-        // synchronization; we guarantee the ordering by setting before spawn.
-        unsafe {
-            std::env::set_var(
-                "IOS_REMOTE_WDA_URL",
-                format!("http://127.0.0.1:{}", cli.synthetic_wda_port),
-            );
-        }
+        let wda_listener = match tokio::net::TcpListener::bind(wda_addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                tracing::error!(
+                    addr = %wda_addr,
+                    error = %e,
+                    "Synthetic mode: WDA stub failed to bind. Is the port already in use? \
+                     Override with --synthetic-wda-port <PORT>."
+                );
+                anyhow::bail!("synthetic WDA stub bind on {} failed: {}", wda_addr, e);
+            }
+        };
 
         // Bridge synthetic frames → existing FrameBus. Down-stream consumers
         // (display, recording, screenshot, OCR, AI, replay) are unchanged.
@@ -396,7 +414,7 @@ async fn main() -> anyhow::Result<()> {
             cli.web_port
         );
 
-        let _handles = synthetic::spawn(info, frame_publish, subtitle_push, wda_addr);
+        let _handles = synthetic::spawn(info, frame_publish, subtitle_push, wda_listener);
 
         // Wait for the display window to close (Q/Esc/X). The synthetic
         // background tasks are aborted on handle drop right after.

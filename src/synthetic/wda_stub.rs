@@ -8,23 +8,23 @@
 
 use axum::{Json, Router, extract::Path, routing::post};
 use serde_json::{Value, json};
-use std::net::SocketAddr;
+use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tracing::info;
 
-pub fn spawn(addr: SocketAddr) -> JoinHandle<()> {
+/// Serve the dummy WDA endpoints on a pre-bound listener. The caller is
+/// responsible for the bind so port-in-use surfaces synchronously as a
+/// hard error (instead of silently leaving `IOS_REMOTE_WDA_URL` pointing
+/// at a dead socket — or worse, another process that happened to grab the
+/// port first).
+pub fn serve(listener: TcpListener) -> JoinHandle<()> {
     tokio::spawn(async move {
         let app = router();
-        match tokio::net::TcpListener::bind(addr).await {
-            Ok(listener) => {
-                info!(%addr, "[wda-stub] dummy WDA listening");
-                if let Err(e) = axum::serve(listener, app).await {
-                    tracing::error!(error = %e, "[wda-stub] server stopped");
-                }
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, %addr, "[wda-stub] bind failed");
-            }
+        if let Ok(addr) = listener.local_addr() {
+            info!(%addr, "[wda-stub] dummy WDA listening");
+        }
+        if let Err(e) = axum::serve(listener, app).await {
+            tracing::error!(error = %e, "[wda-stub] server stopped");
         }
     })
 }
@@ -71,19 +71,19 @@ async fn get_status() -> Json<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::SocketAddr;
     use std::time::Duration;
 
     async fn bind_random() -> (SocketAddr, JoinHandle<()>) {
-        // Grab an OS-assigned port, then immediately release it for the stub
-        // to rebind. There's a tiny race window but tests rerun cleanly.
+        // Bind a real loopback listener and hand it straight to serve() —
+        // no drop-then-rebind dance, no race window.
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind tmp");
         let addr = listener.local_addr().expect("local_addr");
-        drop(listener);
-        let handle = spawn(addr);
-        // Give the server time to bind.
-        tokio::time::sleep(Duration::from_millis(120)).await;
+        let handle = serve(listener);
+        // Give axum::serve a moment to enter its accept loop.
+        tokio::time::sleep(Duration::from_millis(50)).await;
         (addr, handle)
     }
 
