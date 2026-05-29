@@ -630,6 +630,7 @@ mod tests {
                 crate::features::display_state::DisplayState::new(),
             )),
             transcriber: None,
+            synthetic_state: None,
         }
     }
 

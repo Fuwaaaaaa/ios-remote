@@ -16,7 +16,9 @@
 //! `crate::features::stats_overlay` (also used by the subtitle renderer);
 //! this module does not duplicate it.
 
+pub mod layout;
 pub mod renderer;
+pub mod state;
 pub mod subtitle_pump;
 pub mod wda_stub;
 
@@ -45,30 +47,48 @@ impl SyntheticDeviceInfo {
     }
 }
 
-/// Lightweight handle returned by `spawn()` so the caller can keep the tasks
-/// alive for the lifetime of main. Drop = abort all spawned tasks.
+/// Handle returned by `spawn()` so the caller can keep the tasks alive for the
+/// lifetime of main. Dropping it aborts all spawned tasks (see `impl Drop`).
 pub struct SyntheticHandles {
-    pub _frame_task: tokio::task::JoinHandle<()>,
-    pub _subtitle_task: tokio::task::JoinHandle<()>,
-    pub _wda_task: tokio::task::JoinHandle<()>,
+    frame_task: tokio::task::JoinHandle<()>,
+    subtitle_task: tokio::task::JoinHandle<()>,
+    wda_task: tokio::task::JoinHandle<()>,
 }
 
-/// Spawn all synthetic background tasks. Caller must keep `SyntheticHandles`
-/// alive for the duration of the run. The WDA listener is bound by the
-/// caller so port-in-use is a hard error reported by main before the
-/// `IOS_REMOTE_WDA_URL` redirect points at a dead socket.
+impl Drop for SyntheticHandles {
+    /// Abort the background tasks so dropping the handle actually tears them
+    /// down (I1 — previously the comment claimed this but `JoinHandle` drop
+    /// only detaches).
+    fn drop(&mut self) {
+        self.frame_task.abort();
+        self.subtitle_task.abort();
+        self.wda_task.abort();
+    }
+}
+
+/// Spawn all synthetic background tasks against a shared [`state::DeviceState`]
+/// and a shared monotonic clock (`start`). The renderer reads the state each
+/// frame; the WDA stub mutates it on input — so the same `device` handle can
+/// also be exposed read-only via `GET /api/synthetic/state`.
+///
+/// Caller must keep `SyntheticHandles` alive for the duration of the run. The
+/// WDA listener is bound by the caller so port-in-use is a hard error reported
+/// by main before the `IOS_REMOTE_WDA_URL` redirect points at a dead socket.
 pub fn spawn(
     info: SyntheticDeviceInfo,
+    device: state::SharedState,
+    start: std::sync::Arc<std::time::Instant>,
     frame_publish: std::sync::Arc<dyn Fn(renderer::SyntheticFrame) + Send + Sync>,
     subtitle_push: std::sync::Arc<dyn Fn(String) + Send + Sync>,
     wda_listener: tokio::net::TcpListener,
 ) -> SyntheticHandles {
-    let frame_task = renderer::spawn_frame_loop(info.clone(), frame_publish);
+    let frame_task =
+        renderer::spawn_frame_loop(info.clone(), device.clone(), start.clone(), frame_publish);
     let subtitle_task = subtitle_pump::spawn(subtitle_push);
-    let wda_task = wda_stub::serve(wda_listener);
+    let wda_task = wda_stub::serve(wda_listener, device, start);
     SyntheticHandles {
-        _frame_task: frame_task,
-        _subtitle_task: subtitle_task,
-        _wda_task: wda_task,
+        frame_task,
+        subtitle_task,
+        wda_task,
     }
 }

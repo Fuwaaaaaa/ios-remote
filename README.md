@@ -131,8 +131,11 @@ and the on-device check-list used to validate each stage.
 
 Run the full pipeline — display window, recording, screenshots, OCR, AI
 vision, Session Replay, REST API, macros, subtitles — without plugging
-in a phone. Useful for development, demos, CI, and as a fallback while
-iOS 17+ hardware capture (Stage C-7) is in progress.
+in a phone. The synthetic device is **interactive**: WDA input actually
+drives the screen, so you can operate and demo the whole app device-free.
+Useful for development, demos, CI (on a **Windows** runner — the display
+layer is Windows-only per `build.rs`), and as a fallback while iOS 17+
+hardware capture (Stage C-7) is in progress.
 
 ```bash
 cargo run --release -- --synthetic
@@ -141,18 +144,27 @@ cargo run --release -- --synthetic
 
 What happens:
 
-- A 390x844 RGBA frame is rendered every 33ms: black status bar with
-  clock + LTE + 100% battery, navy/purple gradient wallpaper, a 4x6
-  colored app icon grid (labels A–X), a rotating notification banner
-  every 30s, and a monotonic frame counter in the bottom-right corner.
+- A 390x844 RGBA frame is rendered every 33ms. The home screen has a
+  black status bar (clock + LTE + 100% battery), navy/purple gradient
+  wallpaper, a swipeable 4x6 colored app-icon grid, page dots, a rotating
+  notification banner, and a monotonic frame counter.
+- **It's interactive.** Tapping an app icon (via a macro or the WDA stub)
+  opens that app's view; tapping the back chevron or the bottom home
+  indicator returns to the grid; horizontal swipes flip home pages;
+  vertical swipes scroll an open app; a long press flashes a highlight.
+  Screenshots / OCR / AI / recording capture whatever is on screen.
 - `/api/status` returns `connected: true` with device `Synthetic iPhone`,
   iOS `17.5`, UDID `SYNTHETIC-…`.
+- `/api/synthetic/state` (synthetic mode only) returns a read-only view of
+  the device: current `screen` (`home`/`app`), open `app`, `page`,
+  `app_scroll`, and the `interactions` count.
 - `/api/screenshot`, `/api/recording/start`, `/api/ocr`,
   `/api/ai/describe`, `/api/replay/*` all behave exactly as in
   real-device mode.
 - A dummy WebDriverAgent stub binds `127.0.0.1:8101`, so
-  `/api/macros/run` taps/swipes succeed (logged on stdout, no real input
-  is dispatched anywhere).
+  `/api/macros/run` taps/swipes succeed and are applied to the synthetic
+  screen. The full macro engine — including `Repeat` and `WaitForScreen`
+  (template matching against the live frame) — works here.
 - `/api/subtitles` is populated with a rotating English placeholder
   every 5 s.
 
@@ -273,7 +285,7 @@ stats, screenshot, recording, subtitles, and the WDA stub in ~3 s.
 
 If WDA isn't running, `Tap` / `Swipe` / `LongPress` actions return errors but the process won't crash — `Wait` and `Screenshot` actions keep working.
 
-> **Testing macros without WDA?** `--synthetic` automatically points `IOS_REMOTE_WDA_URL` at a dummy WDA stub on `127.0.0.1:8101` that accepts `/session`, `/tap/0`, `/dragfromtoforduration`, `/touchAndHold` and answers with HTTP 200. Inputs are logged to stdout so you can verify the macro engine actually fired the call, without needing a developer-signed WDA build. Override the port with `--synthetic-wda-port <PORT>` if 8101 is in use.
+> **Testing macros without WDA?** `--synthetic` automatically points `IOS_REMOTE_WDA_URL` at a dummy WDA stub on `127.0.0.1:8101` that accepts `/session`, `/tap/0`, `/dragfromtoforduration`, `/touchAndHold` and answers with HTTP 200. Input is **applied to the synthetic screen** (taps open apps, swipes flip pages, the home indicator returns home) — verify the effect via `GET /api/synthetic/state` — without needing a developer-signed WDA build. The full engine works here, including `Repeat` and `WaitForScreen` (which matches a template against the live synthetic frame). Override the port with `--synthetic-wda-port <PORT>` if 8101 is in use.
 
 ## Session Replay
 
@@ -520,9 +532,11 @@ src/
 │   └── throttle.rs       Bandwidth control
 ├── synthetic/           --synthetic mode (no iPhone required, v0.8.0+)
 │   ├── mod.rs           Entry, SyntheticDeviceInfo, task spawn
-│   ├── renderer.rs      30 FPS iPhone-shaped mock screen renderer
+│   ├── layout.rs        Home-grid geometry + tap hit-testing (shared)
+│   ├── state.rs         Interactive DeviceState + input transitions
+│   ├── renderer.rs      30 FPS renderer, draws current screen from state
 │   ├── subtitle_pump.rs 5s-tick synthetic subtitle pusher
-│   └── wda_stub.rs      Dummy WebDriverAgent on 127.0.0.1:8101
+│   └── wda_stub.rs      Dummy WDA on 127.0.0.1:8101, applies input to state
 └── idevice/             USB device integration (stubs)
     ├── device_info.rs     Device info
     ├── file_transfer.rs   File transfer (AFC)

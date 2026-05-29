@@ -282,6 +282,21 @@ async fn main() -> anyhow::Result<()> {
         );
     });
 
+    // ── Synthetic interactive device state ──────────────────────────────────
+    // In synthetic mode this `Arc<Mutex<DeviceState>>` is shared three ways:
+    // the renderer reads it each frame, the WDA stub mutates it on tap/swipe,
+    // and the REST API exposes a read-only view at `GET /api/synthetic/state`.
+    // `None` in real-device mode (the endpoint then 404/503s).
+    let synthetic_info = synthetic::SyntheticDeviceInfo::default_iphone_15();
+    let synthetic_state = if cli.synthetic {
+        Some(synthetic::state::new_shared(
+            synthetic_info.width,
+            synthetic_info.height,
+        ))
+    } else {
+        None
+    };
+
     // ── Shared API state ────────────────────────────────────────────────────
     // Built up-front (before the web spawn) so the Stream Deck HID thread
     // can also dispatch through it.
@@ -303,6 +318,7 @@ async fn main() -> anyhow::Result<()> {
         dashboard_url,
         display: display_state.clone(),
         transcriber: transcriber.clone(),
+        synthetic_state: synthetic_state.clone(),
     });
 
     // ── Web dashboard ───────────────────────────────────────────────────────
@@ -347,7 +363,14 @@ async fn main() -> anyhow::Result<()> {
             tracing::warn!("--device is ignored when --synthetic is set");
         }
 
-        let info = synthetic::SyntheticDeviceInfo::default_iphone_15();
+        let info = synthetic_info.clone();
+        // Shared interactive state (created above for the REST endpoint) +
+        // a shared monotonic clock so the renderer and the WDA stub agree on
+        // input timestamps (long-press flash decay).
+        let device = synthetic_state
+            .clone()
+            .unwrap_or_else(|| synthetic::state::new_shared(info.width, info.height));
+        let clock = std::sync::Arc::new(std::time::Instant::now());
 
         // Pre-populate stats so /api/status reports "connected" and the
         // dashboard's Status card shows the synthetic device identity.
@@ -414,7 +437,14 @@ async fn main() -> anyhow::Result<()> {
             cli.web_port
         );
 
-        let _handles = synthetic::spawn(info, frame_publish, subtitle_push, wda_listener);
+        let _handles = synthetic::spawn(
+            info,
+            device,
+            clock,
+            frame_publish,
+            subtitle_push,
+            wda_listener,
+        );
 
         // Wait for the display window to close (Q/Esc/X). The synthetic
         // background tasks are aborted on handle drop right after.

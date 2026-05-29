@@ -46,6 +46,10 @@ pub struct ApiState {
     /// with `--features audio_capture` and a working device). Subtitles and
     /// the audio source state are read/written through this handle.
     pub transcriber: Option<Arc<std::sync::Mutex<Transcriber>>>,
+    /// Shared interactive synthetic-device state. `Some` only in `--synthetic`
+    /// mode; exposed read-only via `GET /api/synthetic/state` so tests (and
+    /// curious users) can observe the current screen / page after input.
+    pub synthetic_state: Option<crate::synthetic::state::SharedState>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -94,6 +98,8 @@ pub fn router(state: Arc<ApiState>) -> Router {
         // Audio capture / subtitles
         .route("/api/audio/status", get(get_audio_status))
         .route("/api/subtitles", get(get_subtitles))
+        // Synthetic-mode introspection (read-only; 503 in real-device mode)
+        .route("/api/synthetic/state", get(get_synthetic_state))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_bearer,
@@ -340,17 +346,82 @@ struct MacroRunRequest {
     name: String,
 }
 
-async fn run_macro(Json(req): Json<MacroRunRequest>) -> Json<serde_json::Value> {
+async fn run_macro(
+    State(state): State<Arc<ApiState>>,
+    Json(req): Json<MacroRunRequest>,
+) -> Json<serde_json::Value> {
     let path = std::path::Path::new("macros").join(format!("{}.json", req.name));
     match crate::features::macros::Macro::load(&path) {
         Ok(m) => {
-            tokio::spawn(async move {
-                let _ = m.execute().await;
+            // Fire-and-forget: the macro runs in the background and the REST
+            // contract stays `{"status":"started"}`. Errors (WaitForScreen
+            // timeout, Repeat nesting) are logged; their effect is observable
+            // via device state / subsequent actions. The FrameBus is the frame
+            // source so WaitForScreen can poll real frames.
+            //
+            // Run on a dedicated OS thread with its own current-thread runtime.
+            // `WdaClient` issues a *blocking* `curl`; in synthetic mode the WDA
+            // stub lives on the main runtime, so running the macro there would
+            // block a worker and could starve the very stub it's calling
+            // (loopback request → no response → timeout). A separate runtime
+            // keeps the blocking I/O off the main workers.
+            let frame_bus = state.frame_bus.clone();
+            std::thread::spawn(move || {
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        warn!(error = %e, "macro runtime build failed");
+                        return;
+                    }
+                };
+                rt.block_on(async move {
+                    let client = crate::features::wda_client::default_wda_client();
+                    if let Err(e) = m.execute_full(&client, &frame_bus).await {
+                        warn!(error = %e, "macro execution failed");
+                    }
+                });
             });
             Json(serde_json::json!({ "status": "started", "name": req.name }))
         }
         Err(e) => Json(serde_json::json!({ "error": e })),
     }
+}
+
+/// `GET /api/synthetic/state` — read-only view of the interactive synthetic
+/// device. Returns `503` in real-device mode (no synthetic state). This is the
+/// deterministic observable e2e tests use to assert that input changed the
+/// screen (far more robust than diffing frames whose clock ticks every frame).
+async fn get_synthetic_state(
+    State(state): State<Arc<ApiState>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    use crate::synthetic::state::Screen;
+    let Some(shared) = &state.synthetic_state else {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    };
+    let snap = {
+        let guard = shared.lock().unwrap_or_else(|e| e.into_inner());
+        guard.snapshot()
+    };
+    let (screen, app) = match snap.screen {
+        Screen::Home => ("home", serde_json::Value::Null),
+        Screen::App { index } => (
+            "app",
+            serde_json::json!({
+                "index": index,
+                "letter": crate::synthetic::layout::app_letter(index).to_string(),
+            }),
+        ),
+    };
+    Ok(Json(serde_json::json!({
+        "screen": screen,
+        "app": app,
+        "page": snap.home_page,
+        "app_scroll": snap.app_scroll,
+        "interactions": snap.interactions,
+    })))
 }
 
 // ─── Command palette ─────────────────────────────────────────────────────────
@@ -506,6 +577,7 @@ mod tests {
             dashboard_url: "http://127.0.0.1:8080".into(),
             display: Arc::new(std::sync::Mutex::new(DisplayState::new())),
             transcriber: None,
+            synthetic_state: None,
         })
     }
 
