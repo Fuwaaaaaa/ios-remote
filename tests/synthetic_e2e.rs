@@ -240,19 +240,57 @@ fn screenshot_returns_a_path_when_frames_flow() {
     );
 }
 
+fn ffmpeg_on_path() -> bool {
+    Command::new("ffmpeg")
+        .arg("-version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 #[test]
-fn recording_lifecycle_returns_success() {
-    let _proc = spawn_synthetic(38084, 38104);
+fn recording_lifecycle_produces_replayable_session_or_explains_why_not() {
+    let ws = std::env::temp_dir().join("ios_remote_e2e_ws_recording");
+    let _ = fs::remove_dir_all(&ws);
+    fs::create_dir_all(&ws).expect("create recording workspace");
+    let _proc = spawn_opts(38084, 38104, Some(&ws), &[]);
     wait_until_ready(38084);
     std::thread::sleep(Duration::from_millis(300));
+
     let (start_code, start_body) = http_post("http://127.0.0.1:38084/api/recording/start", "{}");
+    if !ffmpeg_on_path() {
+        // No encoder → an honest 503 instead of a "started" that writes an
+        // empty file.
+        assert_eq!(start_code, 503, "start body={start_body}");
+        assert!(start_body.contains("ffmpeg"), "got: {start_body}");
+        let (stop_code, _) = http_post("http://127.0.0.1:38084/api/recording/stop", "{}");
+        assert_eq!(stop_code, 409, "nothing to stop");
+        let _ = fs::remove_dir_all(&ws);
+        return;
+    }
+
     assert_eq!(start_code, 200, "start body={start_body}");
-    std::thread::sleep(Duration::from_secs(1));
+    assert!(start_body.contains("session_"), "got: {start_body}");
+    std::thread::sleep(Duration::from_millis(500));
+    let (bm_code, bm_body) = http_post(
+        "http://127.0.0.1:38084/api/recording/bookmark",
+        r#"{"label":"halfway"}"#,
+    );
+    assert_eq!(bm_code, 200, "bookmark body={bm_body}");
+    std::thread::sleep(Duration::from_millis(1500));
     let (stop_code, stop_body) = http_post("http://127.0.0.1:38084/api/recording/stop", "{}");
     assert_eq!(stop_code, 200, "stop body={stop_body}");
-    // The H.264 file is empty without ffmpeg, but the controller lifecycle
-    // succeeds regardless and the file path is reported. That's what we
-    // want from synthetic mode — the API never bubbles up missing-device errors.
+    std::thread::sleep(Duration::from_millis(500));
+
+    // The recording is immediately visible to Replay.
+    let (code, body) = http_get("http://127.0.0.1:38084/api/replay/sessions");
+    assert_eq!(code, 200);
+    assert!(
+        body.contains("session_") && body.contains("\"width\":390"),
+        "recording should be listed for replay, got {body}"
+    );
+    let _ = fs::remove_dir_all(&ws);
 }
 
 #[test]

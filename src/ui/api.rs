@@ -95,6 +95,7 @@ pub fn router(state: Arc<ApiState>) -> Router {
         .route("/api/screenshot", post(take_screenshot))
         .route("/api/recording/start", post(start_recording))
         .route("/api/recording/stop", post(stop_recording))
+        .route("/api/recording/bookmark", post(add_recording_bookmark))
         // Replay
         .route("/api/replay/sessions", get(list_replay_sessions))
         .route("/api/replay/load", post(load_replay))
@@ -209,6 +210,27 @@ async fn start_recording(State(state): State<Arc<ApiState>>) -> Response {
         Ok(path) => Json(serde_json::json!({
             "status": "recording_started",
             "path": path.display().to_string(),
+        }))
+        .into_response(),
+        Err(e) => json_error(e.status_code(), e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct BookmarkRequest {
+    label: String,
+}
+
+/// `POST /api/recording/bookmark` — mark a point in the active recording;
+/// bookmarks become seek buttons in the Replay card.
+async fn add_recording_bookmark(
+    State(state): State<Arc<ApiState>>,
+    Json(req): Json<BookmarkRequest>,
+) -> Response {
+    match state.recorder.add_bookmark(req.label.trim()) {
+        Ok(bookmark) => Json(serde_json::json!({
+            "status": "bookmarked",
+            "bookmark": bookmark,
         }))
         .into_response(),
         Err(e) => json_error(StatusCode::CONFLICT, e),

@@ -1,11 +1,33 @@
 use super::{Frame, FrameBus};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
+/// Whether `ffmpeg` can be launched from PATH. A positive result is cached;
+/// a negative one is re-probed on the next call, so installing ffmpeg while
+/// the app runs starts working without a restart (the encoder task retries
+/// its spawn on every frame too).
+pub fn ffmpeg_available() -> bool {
+    static FOUND: AtomicBool = AtomicBool::new(false);
+    if FOUND.load(Ordering::Relaxed) {
+        return true;
+    }
+    let ok = std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    if ok {
+        FOUND.store(true, Ordering::Relaxed);
+    }
+    ok
+}
+
 /// Live H.264 encoder: subscribes to the FrameBus, feeds each RGBA frame into
 /// an `ffmpeg`/`libx264` subprocess, and republishes the resulting NAL units
-/// back onto the bus so recording / RTMP / SessionRecorder consumers see
+/// back onto the bus so recording / RTMP consumers see
 /// populated `Frame.h264_nalu`. Without this, the screenshotr PNG→RGBA path
 /// produces no H.264 and every H.264-only consumer is a no-op.
 ///
@@ -189,7 +211,9 @@ async fn reader_task(
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_micros() as u64)
                         .unwrap_or(0);
-                    frame_bus.publish(Frame {
+                    // Derived output: must flow even while live capture is
+                    // suspended for a replay.
+                    frame_bus.publish_derived(Frame {
                         width,
                         height,
                         rgba: Vec::new(),

@@ -332,9 +332,9 @@ pub fn execute(action_id: &str, state: &ApiState) -> Result<CommandResult, Comma
             ))
         }
         "record_start" => {
-            let path = state.recorder.start().map_err(|m| CommandError::Failed {
+            let path = state.recorder.start().map_err(|e| CommandError::Failed {
                 action: "record_start".into(),
-                message: m,
+                message: e.to_string(),
             })?;
             Ok(CommandResult::ok(
                 "record_start",
