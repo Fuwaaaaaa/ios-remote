@@ -1,15 +1,62 @@
 use crate::ui::api::ApiState;
-use axum::{extract::State, response::Html};
+use axum::{
+    extract::{ConnectInfo, Request, State},
+    http::header::HOST,
+    response::Html,
+};
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
-/// Serve the embedded web dashboard with the current API token baked into the
-/// page so same-origin fetch calls can attach it as a Bearer header.
-pub async fn dashboard(State(state): State<Arc<ApiState>>) -> Html<String> {
+/// Serve the embedded web dashboard.
+///
+/// `/` sits outside the bearer middleware (the page has to load before it can
+/// authenticate), so the API token is only inlined for requests that are
+/// provably from this machine: a loopback peer *and* a loopback `Host` header.
+/// Everyone else — LAN clients under `--lan`, or a DNS-rebinding page whose
+/// `Host` is a foreign name resolving to 127.0.0.1 — gets the page without a
+/// token and is asked to paste it in.
+pub async fn dashboard(State(state): State<Arc<ApiState>>, req: Request) -> Html<String> {
+    let peer = req
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|c| c.0);
+    let host = req.headers().get(HOST).and_then(|v| v.to_str().ok());
+    let token = if is_trusted_local_request(peer, host) {
+        state.api_token.as_str()
+    } else {
+        ""
+    };
     // JSON-escape the token defensively; our generator emits alphanumerics + `-_`
     // so this is belt-and-suspenders.
-    let token_js = serde_json::to_string(&state.api_token).unwrap_or_else(|_| "\"\"".to_string());
+    let token_js = serde_json::to_string(token).unwrap_or_else(|_| "\"\"".to_string());
     let bootstrap = format!("<script>window.__IOS_REMOTE_TOKEN={token_js};</script>");
     Html(DASHBOARD_HTML.replace("<!--BOOTSTRAP-->", &bootstrap))
+}
+
+/// True only when the TCP peer is loopback and the `Host` header names a
+/// loopback host. Missing connection info (e.g. a router built without
+/// `into_make_service_with_connect_info`) is treated as untrusted.
+pub(crate) fn is_trusted_local_request(peer: Option<SocketAddr>, host: Option<&str>) -> bool {
+    let Some(peer) = peer else {
+        return false;
+    };
+    if !peer.ip().to_canonical().is_loopback() {
+        return false;
+    }
+    host.is_some_and(host_is_loopback)
+}
+
+fn host_is_loopback(host: &str) -> bool {
+    let name = match host.strip_prefix('[') {
+        // "[::1]:8080" / "[::1]"
+        Some(rest) => rest.split(']').next().unwrap_or(""),
+        // "127.0.0.1:8080" / "localhost" — strip an optional port.
+        None => host.rsplit_once(':').map_or(host, |(h, _)| h),
+    };
+    name.eq_ignore_ascii_case("localhost")
+        || name
+            .parse::<IpAddr>()
+            .is_ok_and(|ip| ip.to_canonical().is_loopback())
 }
 
 const DASHBOARD_HTML: &str = r#"<!DOCTYPE html>
@@ -47,6 +94,19 @@ const DASHBOARD_HTML: &str = r#"<!DOCTYPE html>
 <body>
 <div class="container">
   <h1>ios-remote Dashboard</h1>
+
+  <div class="card" id="token-card" hidden>
+    <h2>API token required</h2>
+    <p style="font-size:13px; color:#aaa; margin-bottom:10px;">
+      This page was opened from another host, so the token is not embedded.
+      Paste the value of <code>[network] api_token</code> from <code>ios-remote.toml</code>.
+    </p>
+    <div style="display:flex; gap:8px;">
+      <input id="token-input" type="password" autocomplete="off" style="flex:1; background:#0f3460; color:#eee;
+             border:1px solid #00d4ff33; border-radius:6px; padding:8px;">
+      <button class="btn" onclick="saveToken()">Use token</button>
+    </div>
+  </div>
 
   <div class="card">
     <h2>Status</h2>
@@ -105,13 +165,36 @@ const DASHBOARD_HTML: &str = r#"<!DOCTYPE html>
 
 <script>
 const API = '';
-const TOKEN = window.__IOS_REMOTE_TOKEN || '';
-const AUTH_HEADERS = TOKEN ? {'Authorization': `Bearer ${TOKEN}`} : {};
+const TOKEN_KEY = 'iosRemoteToken';
+function readToken() {
+  if (window.__IOS_REMOTE_TOKEN) return window.__IOS_REMOTE_TOKEN;
+  // `#token=...` never reaches the server (fragments are client-side only).
+  const m = location.hash.match(/token=([^&]+)/);
+  if (m) {
+    const t = decodeURIComponent(m[1]);
+    try { sessionStorage.setItem(TOKEN_KEY, t); } catch(e) {}
+    history.replaceState(null, '', location.pathname + location.search);
+    return t;
+  }
+  try { return sessionStorage.getItem(TOKEN_KEY) || ''; } catch(e) { return ''; }
+}
+let TOKEN = readToken();
+function showTokenPrompt() { document.getElementById('token-card').hidden = false; }
+function saveToken() {
+  TOKEN = document.getElementById('token-input').value.trim();
+  try { sessionStorage.setItem(TOKEN_KEY, TOKEN); } catch(e) {}
+  document.getElementById('token-card').hidden = true;
+  fetchStats(); loadHistory(); replayRefresh();
+}
 async function api(path, opts) {
   opts = opts || {};
-  opts.headers = Object.assign({}, opts.headers || {}, AUTH_HEADERS);
-  return fetch(`${API}${path}`, opts);
+  const auth = TOKEN ? {'Authorization': `Bearer ${TOKEN}`} : {};
+  opts.headers = Object.assign({}, opts.headers || {}, auth);
+  const r = await fetch(`${API}${path}`, opts);
+  if (r.status === 401) showTokenPrompt();
+  return r;
 }
+if (!TOKEN) showTokenPrompt();
 
 function log(msg) {
   const el = document.getElementById('log');
@@ -266,3 +349,67 @@ log('Dashboard loaded');
 </script>
 </body>
 </html>"#;
+
+#[cfg(test)]
+mod tests {
+    use super::is_trusted_local_request;
+    use std::net::SocketAddr;
+
+    fn peer(s: &str) -> Option<SocketAddr> {
+        Some(s.parse().unwrap())
+    }
+
+    #[test]
+    fn loopback_peer_with_loopback_host_is_trusted() {
+        assert!(is_trusted_local_request(
+            peer("127.0.0.1:50000"),
+            Some("127.0.0.1:8080")
+        ));
+        assert!(is_trusted_local_request(
+            peer("127.0.0.1:50000"),
+            Some("localhost:8080")
+        ));
+        assert!(is_trusted_local_request(
+            peer("[::1]:50000"),
+            Some("[::1]:8080")
+        ));
+        assert!(is_trusted_local_request(
+            peer("[::ffff:127.0.0.1]:50000"),
+            Some("127.0.0.1")
+        ));
+    }
+
+    #[test]
+    fn lan_peer_never_gets_the_token() {
+        // `--lan`: another host hits 0.0.0.0:8080 using this machine's LAN IP
+        // or even a spoofed loopback Host header.
+        assert!(!is_trusted_local_request(
+            peer("192.168.1.20:50000"),
+            Some("192.168.1.10:8080")
+        ));
+        assert!(!is_trusted_local_request(
+            peer("192.168.1.20:50000"),
+            Some("127.0.0.1:8080")
+        ));
+    }
+
+    #[test]
+    fn dns_rebinding_host_is_rejected() {
+        // Browser resolved evil.example → 127.0.0.1; peer is loopback but the
+        // Host header still names the attacker's domain.
+        assert!(!is_trusted_local_request(
+            peer("127.0.0.1:50000"),
+            Some("evil.example:8080")
+        ));
+        assert!(!is_trusted_local_request(
+            peer("127.0.0.1:50000"),
+            Some("localhost.evil.example")
+        ));
+    }
+
+    #[test]
+    fn missing_connect_info_or_host_is_untrusted() {
+        assert!(!is_trusted_local_request(None, Some("127.0.0.1:8080")));
+        assert!(!is_trusted_local_request(peer("127.0.0.1:50000"), None));
+    }
+}

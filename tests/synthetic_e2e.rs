@@ -280,6 +280,31 @@ fn dummy_wda_tap_returns_200_via_session() {
     assert!(tap_body.contains("value"), "got: {tap_body}");
 }
 
+// ─── Dashboard token exposure ──────────────────────────────────────────────
+
+#[test]
+fn dashboard_inlines_token_only_for_loopback_host() {
+    let _proc = spawn_synthetic(38130, 38131);
+    wait_until_ready(38130);
+
+    // Same machine, loopback Host → token inlined so the page just works.
+    let (code, body) = curl(&["http://127.0.0.1:38130/"]);
+    assert_eq!(code, 200);
+    assert!(
+        body.contains(&format!("__IOS_REMOTE_TOKEN=\"{TEST_TOKEN}\"")),
+        "loopback dashboard should embed the token"
+    );
+
+    // DNS-rebinding shape: loopback peer, foreign Host → no token.
+    let (code, body) = curl(&["-H", "Host: evil.example:38130", "http://127.0.0.1:38130/"]);
+    assert_eq!(code, 200);
+    assert!(
+        !body.contains(TEST_TOKEN),
+        "foreign Host must not receive the API token"
+    );
+    assert!(body.contains("__IOS_REMOTE_TOKEN=\"\""), "got: {body}");
+}
+
 // ─── I6: drag + long-press via session ──────────────────────────────────────
 
 #[test]

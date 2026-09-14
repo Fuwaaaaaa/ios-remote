@@ -331,7 +331,10 @@ async fn main() -> anyhow::Result<()> {
         match tokio::net::TcpListener::bind(web_addr).await {
             Ok(listener) => {
                 tracing::info!(addr = %web_addr, "Web dashboard: http://{}", web_addr);
-                if let Err(e) = axum::serve(listener, app).await {
+                // Connect info lets the dashboard handler tell loopback
+                // requests (token inlined) from LAN ones (token withheld).
+                let service = app.into_make_service_with_connect_info::<SocketAddr>();
+                if let Err(e) = axum::serve(listener, service).await {
                     tracing::error!(error = %e, "Web server stopped with error");
                 }
             }
