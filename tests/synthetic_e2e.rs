@@ -507,6 +507,26 @@ fn macro_tap_opens_app() {
     assert_eq!(code, 200, "macro run body={body}");
     let (ok, state) = poll_state(38096, "\"screen\":\"app\"", 30);
     assert!(ok, "macro tap should open an app, state={state}");
+    // The fire-and-forget run's outcome is observable afterwards.
+    let mut last = String::new();
+    for _ in 0..20 {
+        let (_, body) = http_get("http://127.0.0.1:38096/api/macros");
+        last = body;
+        if last.contains("\"state\":\"succeeded\"") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(150));
+    }
+    assert!(
+        last.contains("\"name\":\"open_app\"") && last.contains("\"state\":\"succeeded\""),
+        "GET /api/macros should report last_run succeeded, got {last}"
+    );
+    // Unknown macro → 404 with a JSON error, not a 200 carrying `error`.
+    let (code, body) = http_post(
+        "http://127.0.0.1:38096/api/macros/run",
+        r#"{"name":"no_such_macro"}"#,
+    );
+    assert_eq!(code, 404, "body={body}");
     let _ = fs::remove_dir_all(&ws);
 }
 

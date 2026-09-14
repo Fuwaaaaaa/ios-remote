@@ -319,6 +319,7 @@ async fn main() -> anyhow::Result<()> {
         display: display_state.clone(),
         transcriber: transcriber.clone(),
         synthetic_state: synthetic_state.clone(),
+        macro_runs: Default::default(),
     });
 
     // ── Web dashboard ───────────────────────────────────────────────────────

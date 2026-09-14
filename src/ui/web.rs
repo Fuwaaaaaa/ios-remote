@@ -231,12 +231,14 @@ async function screenshot() {
 
 async function startRec() {
   const r = await api(`/api/recording/start`, {method:'POST'});
-  log('Recording started');
+  const j = await r.json().catch(() => ({}));
+  log(r.ok ? `Recording started → ${j.path}` : `Recording error: ${j.error || r.status}`);
 }
 
 async function stopRec() {
   const r = await api(`/api/recording/stop`, {method:'POST'});
-  log('Recording stopped');
+  const j = await r.json().catch(() => ({}));
+  log(r.ok ? `Recording saved → ${j.path}` : `Recording error: ${j.error || r.status}`);
 }
 
 async function runOcr() {

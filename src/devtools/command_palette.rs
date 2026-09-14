@@ -317,6 +317,10 @@ pub fn execute(action_id: &str, state: &ApiState) -> Result<CommandResult, Comma
             Ok(CommandResult::ok("screenshot", format!("saved → {path}")))
         }
         "screenshot_clipboard" => {
+            state
+                .frame_bus
+                .latest_frame()
+                .ok_or(CommandError::NoFrame)?;
             crate::features::clipboard_sync::copy_screenshot_to_clipboard(&state.frame_bus)
                 .map_err(|m| CommandError::Failed {
                     action: "screenshot_clipboard".into(),
@@ -363,6 +367,10 @@ pub fn execute(action_id: &str, state: &ApiState) -> Result<CommandResult, Comma
             Ok(CommandResult::ok("ocr", text))
         }
         "ocr_clipboard" => {
+            state
+                .frame_bus
+                .latest_frame()
+                .ok_or(CommandError::NoFrame)?;
             let text =
                 crate::features::clipboard_sync::copy_screen_text_to_clipboard(&state.frame_bus)
                     .map_err(|m| CommandError::Failed {
@@ -631,6 +639,7 @@ mod tests {
             )),
             transcriber: None,
             synthetic_state: None,
+            macro_runs: Default::default(),
         }
     }
 

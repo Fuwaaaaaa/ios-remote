@@ -50,6 +50,26 @@ pub struct ApiState {
     /// mode; exposed read-only via `GET /api/synthetic/state` so tests (and
     /// curious users) can observe the current screen / page after input.
     pub synthetic_state: Option<crate::synthetic::state::SharedState>,
+    /// Outcome of the most recent `POST /api/macros/run`, surfaced as
+    /// `last_run` on `GET /api/macros`.
+    pub macro_runs: crate::features::macros::MacroRunTracker,
+}
+
+/// JSON error body with a matching HTTP status, so clients can branch on the
+/// status code instead of sniffing a 200 body for an `error` key.
+fn json_error(status: StatusCode, message: impl Into<String>) -> Response {
+    (
+        status,
+        Json(serde_json::json!({ "status": "error", "error": message.into() })),
+    )
+        .into_response()
+}
+
+fn no_frame() -> Response {
+    json_error(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "no frame available yet — connect a device first",
+    )
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -170,41 +190,39 @@ async fn get_stats(State(state): State<Arc<ApiState>>) -> Json<StreamStats> {
     Json(stats.clone())
 }
 
-async fn take_screenshot(
-    State(state): State<Arc<ApiState>>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    match state.frame_bus.latest_frame() {
-        Some(frame) => match screenshot::save_frame(&frame) {
-            Ok(path) => Ok(Json(serde_json::json!({ "path": path }))),
-            Err(e) => {
-                tracing::warn!(error = %e, "Screenshot API failed");
-                Err(StatusCode::INTERNAL_SERVER_ERROR)
-            }
-        },
-        None => Err(StatusCode::SERVICE_UNAVAILABLE),
+async fn take_screenshot(State(state): State<Arc<ApiState>>) -> Response {
+    let Some(frame) = state.frame_bus.latest_frame() else {
+        return no_frame();
+    };
+    match tokio::task::spawn_blocking(move || screenshot::save_frame(&frame)).await {
+        Ok(Ok(path)) => Json(serde_json::json!({ "path": path })).into_response(),
+        Ok(Err(e)) => {
+            tracing::warn!(error = %e, "Screenshot API failed");
+            json_error(StatusCode::INTERNAL_SERVER_ERROR, e)
+        }
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
 
-async fn start_recording(State(state): State<Arc<ApiState>>) -> Json<serde_json::Value> {
+async fn start_recording(State(state): State<Arc<ApiState>>) -> Response {
     match state.recorder.start() {
         Ok(path) => Json(serde_json::json!({
             "status": "recording_started",
             "path": path.display().to_string(),
-        })),
-        Err(e) => Json(serde_json::json!({ "status": "error", "error": e })),
+        }))
+        .into_response(),
+        Err(e) => json_error(StatusCode::CONFLICT, e),
     }
 }
 
-async fn stop_recording(State(state): State<Arc<ApiState>>) -> Json<serde_json::Value> {
+async fn stop_recording(State(state): State<Arc<ApiState>>) -> Response {
     match state.recorder.stop() {
         Some(path) => Json(serde_json::json!({
             "status": "recording_stopped",
             "path": path.display().to_string(),
-        })),
-        None => Json(serde_json::json!({
-            "status": "idle",
-            "error": "no recording in progress",
-        })),
+        }))
+        .into_response(),
+        None => json_error(StatusCode::CONFLICT, "no recording in progress"),
     }
 }
 
@@ -239,21 +257,22 @@ struct ReplayLoadRequest {
 async fn load_replay(
     State(state): State<Arc<ApiState>>,
     Json(req): Json<ReplayLoadRequest>,
-) -> Json<serde_json::Value> {
+) -> Response {
     match state.replay.load(&req.path) {
         Ok(header) => Json(serde_json::json!({
             "status": "loaded",
             "header": header,
             "bookmarks": state.replay.bookmarks(),
-        })),
-        Err(e) => Json(serde_json::json!({ "status": "error", "error": e })),
+        }))
+        .into_response(),
+        Err(e) => json_error(StatusCode::BAD_REQUEST, e),
     }
 }
 
-async fn play_replay(State(state): State<Arc<ApiState>>) -> Json<serde_json::Value> {
+async fn play_replay(State(state): State<Arc<ApiState>>) -> Response {
     match state.replay.play() {
-        Ok(()) => Json(serde_json::json!({ "status": "playing" })),
-        Err(e) => Json(serde_json::json!({ "status": "error", "error": e })),
+        Ok(()) => Json(serde_json::json!({ "status": "playing" })).into_response(),
+        Err(e) => json_error(StatusCode::CONFLICT, e),
     }
 }
 
@@ -273,13 +292,14 @@ struct ReplaySeekRequest {
 async fn seek_replay(
     State(state): State<Arc<ApiState>>,
     Json(req): Json<ReplaySeekRequest>,
-) -> Json<serde_json::Value> {
+) -> Response {
     match state.replay.seek(req.ts_us) {
         Ok(position) => Json(serde_json::json!({
             "status": "seeked",
             "position": position,
-        })),
-        Err(e) => Json(serde_json::json!({ "status": "error", "error": e })),
+        }))
+        .into_response(),
+        Err(e) => json_error(StatusCode::CONFLICT, e),
     }
 }
 
@@ -304,41 +324,61 @@ async fn get_history(State(state): State<Arc<ApiState>>) -> Json<ConnectionHisto
     Json(history.clone())
 }
 
-async fn run_ocr(
-    State(state): State<Arc<ApiState>>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    match state.frame_bus.latest_frame() {
-        Some(frame) => match crate::features::ocr::extract_text(&frame, None) {
-            Ok(text) => Ok(Json(serde_json::json!({ "text": text }))),
-            Err(e) => Ok(Json(serde_json::json!({ "error": e }))),
-        },
-        None => Err(StatusCode::SERVICE_UNAVAILABLE),
+async fn run_ocr(State(state): State<Arc<ApiState>>) -> Response {
+    let Some(frame) = state.frame_bus.latest_frame() else {
+        return no_frame();
+    };
+    // tesseract is a subprocess — keep it off the async workers.
+    match tokio::task::spawn_blocking(move || crate::features::ocr::extract_text(&frame, None))
+        .await
+    {
+        Ok(Ok(text)) => Json(serde_json::json!({ "text": text })).into_response(),
+        Ok(Err(e)) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct AiRequest {
     prompt: Option<String>,
 }
 
-async fn ai_describe(
-    State(state): State<Arc<ApiState>>,
-    Json(req): Json<AiRequest>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    match state.frame_bus.latest_frame() {
-        Some(frame) => {
-            match crate::features::ai_vision::describe_screen(&frame, req.prompt.as_deref()) {
-                Ok(desc) => Ok(Json(serde_json::json!({ "description": desc }))),
-                Err(e) => Ok(Json(serde_json::json!({ "error": e }))),
-            }
+async fn ai_describe(State(state): State<Arc<ApiState>>, body: axum::body::Bytes) -> Response {
+    // The body is optional: `{}` / empty both mean "use the default prompt".
+    let req: AiRequest = if body.iter().all(u8::is_ascii_whitespace) {
+        AiRequest::default()
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(r) => r,
+            Err(e) => return json_error(StatusCode::BAD_REQUEST, format!("invalid JSON: {e}")),
         }
-        None => Err(StatusCode::SERVICE_UNAVAILABLE),
+    };
+    if !crate::features::ai_vision::api_key_configured() {
+        return json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "ANTHROPIC_API_KEY not set. Set it to use AI screen understanding.",
+        );
+    }
+    let Some(frame) = state.frame_bus.latest_frame() else {
+        return no_frame();
+    };
+    let result = tokio::task::spawn_blocking(move || {
+        crate::features::ai_vision::describe_screen(&frame, req.prompt.as_deref())
+    })
+    .await;
+    match result {
+        Ok(Ok(desc)) => Json(serde_json::json!({ "description": desc })).into_response(),
+        Ok(Err(e)) => json_error(StatusCode::BAD_GATEWAY, e),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
 
-async fn list_macros() -> Json<serde_json::Value> {
+async fn list_macros(State(state): State<Arc<ApiState>>) -> Json<serde_json::Value> {
     let macros = crate::features::macros::list_macros();
-    Json(serde_json::json!({ "macros": macros }))
+    Json(serde_json::json!({
+        "macros": macros,
+        "last_run": state.macro_runs.last(),
+    }))
 }
 
 #[derive(Deserialize)]
@@ -349,45 +389,78 @@ struct MacroRunRequest {
 async fn run_macro(
     State(state): State<Arc<ApiState>>,
     Json(req): Json<MacroRunRequest>,
-) -> Json<serde_json::Value> {
-    let path = std::path::Path::new("macros").join(format!("{}.json", req.name));
-    match crate::features::macros::Macro::load(&path) {
-        Ok(m) => {
-            // Fire-and-forget: the macro runs in the background and the REST
-            // contract stays `{"status":"started"}`. Errors (WaitForScreen
-            // timeout, Repeat nesting) are logged; their effect is observable
-            // via device state / subsequent actions. The FrameBus is the frame
-            // source so WaitForScreen can poll real frames.
-            //
-            // Run on a dedicated OS thread with its own current-thread runtime.
-            // `WdaClient` issues a *blocking* `curl`; in synthetic mode the WDA
-            // stub lives on the main runtime, so running the macro there would
-            // block a worker and could starve the very stub it's calling
-            // (loopback request → no response → timeout). A separate runtime
-            // keeps the blocking I/O off the main workers.
-            let frame_bus = state.frame_bus.clone();
-            std::thread::spawn(move || {
-                let rt = match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                {
-                    Ok(rt) => rt,
-                    Err(e) => {
-                        warn!(error = %e, "macro runtime build failed");
-                        return;
-                    }
-                };
-                rt.block_on(async move {
-                    let client = crate::features::wda_client::default_wda_client();
-                    if let Err(e) = m.execute_full(&client, &frame_bus).await {
-                        warn!(error = %e, "macro execution failed");
-                    }
-                });
-            });
-            Json(serde_json::json!({ "status": "started", "name": req.name }))
-        }
-        Err(e) => Json(serde_json::json!({ "error": e })),
+) -> Response {
+    use crate::features::macros::{Macro, is_valid_macro_name};
+
+    if !is_valid_macro_name(&req.name) {
+        return json_error(StatusCode::BAD_REQUEST, "invalid macro name");
     }
+    let path = std::path::Path::new("macros").join(format!("{}.json", req.name));
+    if !path.is_file() {
+        return json_error(
+            StatusCode::NOT_FOUND,
+            format!("macro '{}' not found under ./macros", req.name),
+        );
+    }
+    let m = match Macro::load(&path) {
+        Ok(m) => m,
+        Err(e) => return json_error(StatusCode::BAD_REQUEST, format!("invalid macro: {e}")),
+    };
+
+    // Fail fast when the macro needs touch input but WebDriverAgent is not
+    // reachable — otherwise the caller gets "started" for a run that dies on
+    // its first tap. Wait/Screenshot-only macros skip the check.
+    if m.requires_input() {
+        let probe = tokio::task::spawn_blocking(|| {
+            crate::features::wda_client::default_wda_client()
+                .ensure_session()
+                .map(|_| ())
+        })
+        .await;
+        match probe {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return json_error(StatusCode::SERVICE_UNAVAILABLE, e.to_string()),
+            Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        }
+    }
+
+    if !state.macro_runs.try_begin(&req.name) {
+        return json_error(StatusCode::CONFLICT, "another macro is still running");
+    }
+
+    // Fire-and-forget: the run's outcome lands in `macro_runs` and is exposed
+    // as `last_run` on `GET /api/macros`.
+    //
+    // Run on a dedicated OS thread with its own current-thread runtime.
+    // `WdaClient` issues a *blocking* `curl`; in synthetic mode the WDA stub
+    // lives on the main runtime, so running the macro there would block a
+    // worker and could starve the very stub it's calling (loopback request →
+    // no response → timeout). A separate runtime keeps the blocking I/O off
+    // the main workers.
+    let frame_bus = state.frame_bus.clone();
+    let tracker = state.macro_runs.clone();
+    std::thread::spawn(move || {
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                warn!(error = %e, "macro runtime build failed");
+                tracker.finish(&Err(format!("macro runtime build failed: {e}")));
+                return;
+            }
+        };
+        let result = rt.block_on(async move {
+            let client = crate::features::wda_client::default_wda_client();
+            m.execute_full(&client, &frame_bus).await
+        });
+        if let Err(e) = &result {
+            warn!(error = %e, "macro execution failed");
+        }
+        tracker.finish(&result);
+    });
+    Json(serde_json::json!({ "status": "started", "name": req.name })).into_response()
 }
 
 /// `GET /api/synthetic/state` — read-only view of the interactive synthetic
@@ -443,14 +516,40 @@ async fn list_commands() -> Json<serde_json::Value> {
 async fn run_command(State(state): State<Arc<ApiState>>, Path(id): Path<String>) -> Response {
     use crate::devtools::command_palette::{CommandError, execute};
 
-    // Quit short-circuits the process — log and return 202 before exit so the
-    // caller sees something. (`execute` calls `process::exit(0)` for "quit".)
+    // `execute("quit")` exits synchronously, which would drop this connection
+    // before any response is written. Answer 202 first, exit shortly after.
     if id == "quit" {
         info!("quit requested via REST API");
-        // We let execute() fire — the response below is just-in-case.
+        tokio::spawn(async {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            std::process::exit(0);
+        });
+        return (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "ok": true,
+                "action": "quit",
+                "message": "shutting down",
+            })),
+        )
+            .into_response();
     }
 
-    match execute(&id, &state) {
+    // Handlers shell out (tesseract, curl, ffmpeg launch) — run them on the
+    // blocking pool so a slow command can't stall the async workers.
+    let outcome = {
+        let state = state.clone();
+        let id = id.clone();
+        tokio::task::spawn_blocking(move || execute(&id, &state)).await
+    };
+    let outcome = match outcome {
+        Ok(r) => r,
+        Err(e) => {
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+        }
+    };
+
+    match outcome {
         Ok(result) => (
             StatusCode::OK,
             Json(serde_json::json!({
@@ -578,6 +677,7 @@ mod tests {
             display: Arc::new(std::sync::Mutex::new(DisplayState::new())),
             transcriber: None,
             synthetic_state: None,
+            macro_runs: Default::default(),
         })
     }
 
@@ -601,6 +701,52 @@ mod tests {
         let state = dummy_state();
         // 'screenshot' needs a frame; bus is empty → 503.
         let resp = run_command(State(state), Path("screenshot".into())).await;
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn analysis_endpoints_return_503_json_without_a_frame() {
+        let state = dummy_state();
+        let resp = run_ocr(State(state.clone())).await;
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let resp = take_screenshot(State(state)).await;
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn recording_stop_when_idle_is_409_not_200() {
+        let resp = stop_recording(State(dummy_state())).await;
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn macro_run_rejects_traversal_and_missing_names() {
+        let state = dummy_state();
+        let resp = run_macro(
+            State(state.clone()),
+            Json(MacroRunRequest {
+                name: "../../etc/passwd".into(),
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        let resp = run_macro(
+            State(state),
+            Json(MacroRunRequest {
+                name: "definitely_not_a_saved_macro_zzz".into(),
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn ai_describe_accepts_empty_body() {
+        let state = dummy_state();
+        let resp = ai_describe(State(state), axum::body::Bytes::new()).await;
+        // Never 415/422 for an empty body: either the key is missing (503),
+        // or — with a key in the environment — there is no frame yet (503).
         assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 

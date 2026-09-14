@@ -50,6 +50,11 @@ struct ResponseContent {
     text: Option<String>,
 }
 
+/// Whether `ANTHROPIC_API_KEY` is set to a non-empty value.
+pub fn api_key_configured() -> bool {
+    std::env::var("ANTHROPIC_API_KEY").is_ok_and(|k| !k.trim().is_empty())
+}
+
 /// Describe what's on the iPhone screen using a vision LLM.
 ///
 /// `api_key` should be set via ANTHROPIC_API_KEY environment variable.

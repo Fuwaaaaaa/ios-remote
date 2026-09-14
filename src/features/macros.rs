@@ -117,7 +117,92 @@ pub enum MacroAction {
     Repeat { count: u32, actions_back: u32 },
 }
 
+/// Lifecycle of the most recent `POST /api/macros/run`.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MacroRunState {
+    Running,
+    Succeeded,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MacroRunReport {
+    pub name: String,
+    pub state: MacroRunState,
+    pub error: Option<String>,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+}
+
+/// Remembers the last macro run so its outcome is observable after the
+/// fire-and-forget REST call returns (`GET /api/macros` → `last_run`).
+#[derive(Clone, Default)]
+pub struct MacroRunTracker {
+    last: Arc<std::sync::Mutex<Option<MacroRunReport>>>,
+}
+
+impl MacroRunTracker {
+    /// Record a new run. Returns `false` (and records nothing) if another
+    /// macro is still running — two macros driving input at once is chaos.
+    pub fn try_begin(&self, name: &str) -> bool {
+        let mut slot = self.last.lock().unwrap_or_else(|e| e.into_inner());
+        if slot
+            .as_ref()
+            .is_some_and(|r| r.state == MacroRunState::Running)
+        {
+            return false;
+        }
+        *slot = Some(MacroRunReport {
+            name: name.to_string(),
+            state: MacroRunState::Running,
+            error: None,
+            started_at: chrono::Local::now().to_rfc3339(),
+            finished_at: None,
+        });
+        true
+    }
+
+    pub fn finish(&self, result: &Result<(), String>) {
+        let mut slot = self.last.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(report) = slot.as_mut() {
+            report.state = if result.is_ok() {
+                MacroRunState::Succeeded
+            } else {
+                MacroRunState::Failed
+            };
+            report.error = result.as_ref().err().cloned();
+            report.finished_at = Some(chrono::Local::now().to_rfc3339());
+        }
+    }
+
+    pub fn last(&self) -> Option<MacroRunReport> {
+        self.last.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+}
+
+/// Macro names map to `macros/<name>.json`; restrict them so a request can't
+/// walk out of that directory.
+pub fn is_valid_macro_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+        && !name.contains("..")
+}
+
 impl Macro {
+    /// True when any action needs the WebDriverAgent input backend.
+    pub fn requires_input(&self) -> bool {
+        self.actions.iter().any(|a| {
+            matches!(
+                a,
+                MacroAction::Tap { .. } | MacroAction::Swipe { .. } | MacroAction::LongPress { .. }
+            )
+        })
+    }
+
     /// Load a macro from a JSON file.
     pub fn load(path: &Path) -> Result<Self, String> {
         let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
@@ -220,13 +305,15 @@ impl Macro {
             }
             MacroAction::Screenshot { delay_ms } => {
                 sleep_ms(*delay_ms).await;
-                info!(
-                    step = idx,
-                    "Macro: screenshot (delegated to screenshot feature)"
-                );
-                // Actual frame grab is owned by screenshot::save_frame via
-                // the API layer; here we just mark the intent so replays
-                // can time screenshots relative to input.
+                // A missing frame is logged, not fatal: README promises
+                // Wait/Screenshot keep working without a live device.
+                match frames.latest() {
+                    Some(frame) => match super::screenshot::save_frame(&frame) {
+                        Ok(path) => info!(step = idx, file = %path, "Macro: screenshot"),
+                        Err(e) => warn!(step = idx, error = %e, "Macro: screenshot failed"),
+                    },
+                    None => warn!(step = idx, "Macro: screenshot skipped — no frame yet"),
+                }
             }
             MacroAction::WaitForScreen {
                 template_path,
@@ -444,6 +531,48 @@ mod tests {
         let img = image::RgbaImage::from_pixel(w, h, image::Rgba(color));
         img.save(&path).expect("write temp template");
         path
+    }
+
+    #[test]
+    fn macro_names_cannot_escape_the_macros_dir() {
+        assert!(is_valid_macro_name("open_app"));
+        assert!(is_valid_macro_name("login-v2.final"));
+        assert!(!is_valid_macro_name(""));
+        assert!(!is_valid_macro_name("../secrets"));
+        assert!(!is_valid_macro_name("a/b"));
+        assert!(!is_valid_macro_name("a\\b"));
+        assert!(!is_valid_macro_name("C:evil"));
+    }
+
+    #[test]
+    fn tracker_rejects_overlap_and_records_outcome() {
+        let t = MacroRunTracker::default();
+        assert!(t.try_begin("first"));
+        assert!(!t.try_begin("second"), "second run must wait");
+        t.finish(&Err("WDA down".into()));
+        let r = t.last().unwrap();
+        assert_eq!(r.name, "first");
+        assert_eq!(r.state, MacroRunState::Failed);
+        assert_eq!(r.error.as_deref(), Some("WDA down"));
+        assert!(t.try_begin("second"), "finished run frees the slot");
+    }
+
+    #[test]
+    fn requires_input_only_for_touch_actions() {
+        assert!(!mac(vec![MacroAction::Wait { duration_ms: 1 }]).requires_input());
+        assert!(mac(vec![MacroAction::Wait { duration_ms: 1 }, tap(0)]).requires_input());
+    }
+
+    #[tokio::test]
+    async fn screenshot_action_without_frame_is_not_fatal() {
+        let m = mac(vec![MacroAction::Screenshot { delay_ms: 0 }, tap(0)]);
+        let spy = Spy::default();
+        m.execute_full(&spy, &EmptyFrames).await.expect("ok");
+        assert_eq!(
+            spy.taps.load(Ordering::SeqCst),
+            1,
+            "later actions still run"
+        );
     }
 
     #[tokio::test]
