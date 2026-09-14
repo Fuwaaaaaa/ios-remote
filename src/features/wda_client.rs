@@ -1,5 +1,4 @@
 use serde::Deserialize;
-use std::process::Command;
 use std::sync::Mutex;
 use tracing::{debug, info, warn};
 
@@ -116,30 +115,38 @@ impl WdaClient {
     }
 
     fn post_json(&self, path: &str, body: &str) -> Result<String, WdaError> {
+        use super::http::{HttpRequest, send};
+
         let url = format!("{}{}", self.base_url, path);
-        let output = Command::new("curl")
-            .args([
-                "-sS",
-                "--max-time",
-                "10",
-                "-X",
-                "POST",
-                &url,
-                "-H",
-                "Content-Type: application/json",
-                "-d",
-                body,
-            ])
-            .output()
-            .map_err(|e| WdaError::Curl(e.to_string()))?;
+        let response = send(
+            &HttpRequest::new("POST", &url)
+                .json_body(body.as_bytes())
+                .timeout_secs(10),
+        )
+        .map_err(|e| {
+            warn!(error = %e, url = %url, "WDA request failed");
+            if e.starts_with("curl not available") {
+                WdaError::Curl(e)
+            } else {
+                WdaError::Unreachable(url.clone())
+            }
+        })?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            warn!(stderr = %stderr, url = %url, "WDA request failed");
-            return Err(WdaError::Unreachable(url));
+        // A 4xx/5xx (stale session, element not found, bad coordinates) is a
+        // failed action, not a completed tap.
+        if !response.is_success() {
+            // WDA forgets sessions on restart; drop ours so the next call
+            // creates a fresh one.
+            if response.status == 404 {
+                *self.session.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            }
+            return Err(WdaError::BadResponse(format!(
+                "HTTP {} from {url}: {}",
+                response.status,
+                response.body.trim()
+            )));
         }
-
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        Ok(response.body)
     }
 }
 

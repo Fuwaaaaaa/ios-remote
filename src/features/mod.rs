@@ -20,6 +20,7 @@ pub mod gestures;
 pub mod gif_capture;
 pub mod h264_encoder;
 pub mod heatmap;
+pub mod http;
 pub mod i18n;
 pub mod imgur_share;
 pub mod iproxy_supervisor;

@@ -199,71 +199,43 @@ pub fn transcribe_blocking(
     Ok(text)
 }
 
-/// Invoke `curl` with a stdin-fed config so neither the API key nor the
-/// `Authorization: Bearer` header ever appear on the process command line.
-/// On Windows other local users (and any tool that lists processes) can
-/// read command lines, so passing the secret via `-H "Authorization: …"`
-/// is a real exposure path. `-K -` reads the config from stdin instead.
+/// Upload the WAV to OpenAI's transcription endpoint. The shared HTTP helper
+/// feeds curl its config over stdin, so the `Authorization: Bearer` header
+/// never appears on the process command line.
 fn run_openai_curl(
     api_key: &str,
     wav_path: &std::path::Path,
     language: Option<&str>,
 ) -> Result<String, String> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
+    use super::http::{HttpRequest, send};
 
-    // curl's config syntax treats backslashes inside double quotes as escape
-    // characters. Forward slashes are accepted on Windows, so normalize to
-    // sidestep escape handling. The api_key is alphanumeric+`-_`, no escaping
-    // needed; we still use a defensive escape pass to be safe.
+    // curl's config syntax treats backslashes as escapes; forward slashes are
+    // accepted on Windows.
     let wav_str = wav_path.display().to_string().replace('\\', "/");
-    let safe_key = escape_curl_config_value(api_key);
-    let safe_path = escape_curl_config_value(&wav_str);
-
-    let mut config = format!(
-        "silent\n\
-         request = \"POST\"\n\
-         url = \"https://api.openai.com/v1/audio/transcriptions\"\n\
-         header = \"Authorization: Bearer {safe_key}\"\n\
-         form = \"file=@{safe_path}\"\n\
-         form = \"model=whisper-1\"\n\
-         form = \"response_format=text\"\n"
-    );
+    let mut req = HttpRequest::new("POST", "https://api.openai.com/v1/audio/transcriptions")
+        .header(format!("Authorization: Bearer {}", api_key.trim()))
+        .form_field(format!("file=@{wav_str}"))
+        .form_field("model=whisper-1")
+        .form_field("response_format=text")
+        .timeout_secs(60);
     // `language` is pre-validated to [a-z]{2,3} by `sanitize_language`.
     if let Some(lang) = language {
-        config.push_str(&format!("form = \"language={lang}\"\n"));
+        req = req.form_field(format!("language={lang}"));
     }
 
-    let mut child = Command::new("curl")
-        .arg("-K")
-        .arg("-")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("curl spawn failed: {e}"))?;
-
-    {
-        let stdin = child
-            .stdin
-            .as_mut()
-            .ok_or_else(|| "curl stdin not available".to_string())?;
-        stdin
-            .write_all(config.as_bytes())
-            .map_err(|e| format!("curl stdin write failed: {e}"))?;
+    let response = send(&req)?;
+    if !response.is_success() {
+        // Error bodies are JSON — never let them reach the subtitle bar.
+        let detail = serde_json::from_str::<serde_json::Value>(&response.body)
+            .ok()
+            .and_then(|j| j["error"]["message"].as_str().map(str::to_string))
+            .unwrap_or_else(|| response.body.trim().to_string());
+        return Err(format!(
+            "OpenAI transcription error {}: {detail}",
+            response.status
+        ));
     }
-
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("curl wait failed: {e}"))?;
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-/// Escape a value to be embedded inside a `curl -K` config double-quoted
-/// string. Per `curl(1)`, backslash and double quote are the only specials.
-fn escape_curl_config_value(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    Ok(response.body.trim().to_string())
 }
 
 #[cfg(feature = "whisper")]
@@ -392,16 +364,6 @@ mod tests {
         let text = "aaaaaaaaaa bbbbbbbbbb cccccccccc dddddddddd";
         let (_a, b) = wrap_two_lines(text, 10);
         assert!(b.ends_with('…'));
-    }
-
-    #[test]
-    fn escape_curl_config_value_handles_specials() {
-        // Backslashes and double quotes are the only specials inside a
-        // curl `-K` double-quoted value; everything else passes through.
-        assert_eq!(escape_curl_config_value("plain"), "plain");
-        assert_eq!(escape_curl_config_value("a\\b"), "a\\\\b");
-        assert_eq!(escape_curl_config_value("a\"b"), "a\\\"b");
-        assert_eq!(escape_curl_config_value("a\\b\"c"), "a\\\\b\\\"c");
     }
 
     #[test]

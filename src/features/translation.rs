@@ -62,35 +62,87 @@ impl TranslationOverlay {
     }
 }
 
-/// Translate text using a free translation API (LibreTranslate or similar).
+/// Translate text with a LibreTranslate server.
+///
+/// `LIBRETRANSLATE_URL` points at the `/translate` endpoint (default: the
+/// public `https://libretranslate.com/translate`, which requires an API key —
+/// set `LIBRETRANSLATE_API_KEY`, or run a local instance and point the URL at
+/// it).
 fn translate_text(text: &str, source: &str, target: &str) -> Result<String, String> {
-    // Try LibreTranslate (self-hosted or public instance)
-    let body = serde_json::json!({
+    use super::http::{HttpRequest, send};
+
+    let url = std::env::var("LIBRETRANSLATE_URL")
+        .unwrap_or_else(|_| "https://libretranslate.com/translate".to_string());
+    let mut body = serde_json::json!({
         "q": text,
         "source": source,
         "target": target,
+        "format": "text",
     });
+    if let Ok(key) = std::env::var("LIBRETRANSLATE_API_KEY")
+        && !key.trim().is_empty()
+    {
+        body["api_key"] = serde_json::Value::String(key.trim().to_string());
+    }
+    let body = body.to_string();
 
-    let output = std::process::Command::new("curl")
-        .args([
-            "-s",
-            "-X",
-            "POST",
-            "https://libretranslate.com/translate",
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-            &body.to_string(),
-        ])
-        .output()
-        .map_err(|e| format!("curl failed: {}", e))?;
+    let response = send(
+        &HttpRequest::new("POST", &url)
+            .json_body(body.as_bytes())
+            .timeout_secs(30),
+    )?;
+    parse_translation(response.status, &response.body)
+}
 
-    if output.status.success() {
-        let resp: serde_json::Value = serde_json::from_slice(&output.stdout)
-            .map_err(|e| format!("JSON parse error: {}", e))?;
-        Ok(resp["translatedText"].as_str().unwrap_or(text).to_string())
-    } else {
-        // Fallback: return original text
-        Err("Translation API unavailable — install LibreTranslate locally".to_string())
+/// Extract `translatedText`, or report why there is none. Never echoes the
+/// source text back as if it were a translation.
+fn parse_translation(status: u16, body: &str) -> Result<String, String> {
+    let json: Option<serde_json::Value> = serde_json::from_str(body).ok();
+    if !(200..300).contains(&status) {
+        let detail = json
+            .as_ref()
+            .and_then(|j| j["error"].as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| body.trim().to_string());
+        return Err(format!(
+            "translation API error {status}: {detail} (set LIBRETRANSLATE_URL / LIBRETRANSLATE_API_KEY)"
+        ));
+    }
+    json.as_ref()
+        .and_then(|j| j["translatedText"].as_str())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            format!(
+                "translation API returned no translatedText: {}",
+                body.trim()
+            )
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_translation;
+
+    #[test]
+    fn success_returns_translated_text() {
+        assert_eq!(
+            parse_translation(200, r#"{"translatedText":"こんにちは"}"#).unwrap(),
+            "こんにちは"
+        );
+    }
+
+    #[test]
+    fn missing_key_error_is_not_mistaken_for_a_translation() {
+        let err = parse_translation(
+            400,
+            r#"{"error":"Visit https://portal.libretranslate.com to get an API key"}"#,
+        )
+        .unwrap_err();
+        assert!(err.contains("400") && err.contains("API key"), "{err}");
+    }
+
+    #[test]
+    fn ok_status_without_field_is_an_error() {
+        assert!(parse_translation(200, r#"{"unexpected":true}"#).is_err());
     }
 }

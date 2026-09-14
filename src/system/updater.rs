@@ -18,17 +18,23 @@ pub fn check_for_update() -> Result<Option<UpdateInfo>, String> {
         GITHUB_REPO
     );
 
-    let output = std::process::Command::new("curl")
-        .args(["-s", "-H", "User-Agent: ios-remote", &url])
-        .output()
-        .map_err(|e| format!("curl failed: {}", e))?;
+    use crate::features::http::{HttpRequest, send};
 
-    if !output.status.success() {
-        return Err("GitHub API request failed".to_string());
+    let response = send(
+        &HttpRequest::new("GET", &url)
+            .header("User-Agent: ios-remote")
+            .header("Accept: application/vnd.github+json")
+            .timeout_secs(15),
+    )?;
+    match response.status {
+        200 => {}
+        404 => return Err("no published GitHub release found".to_string()),
+        403 | 429 => return Err("GitHub API rate limit reached — try again later".to_string()),
+        s => return Err(format!("GitHub API returned HTTP {s}")),
     }
 
     let release: GithubRelease =
-        serde_json::from_slice(&output.stdout).map_err(|e| format!("JSON parse error: {}", e))?;
+        serde_json::from_str(&response.body).map_err(|e| format!("JSON parse error: {e}"))?;
 
     let remote_ver = release.tag_name.trim_start_matches('v');
 
