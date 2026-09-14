@@ -307,11 +307,21 @@ async fn main() -> anyhow::Result<()> {
     } else {
         format!("http://{}", web_addr)
     };
+    // Connection history is persisted for real devices only; the synthetic
+    // device would otherwise pollute connection_history.json on every run.
+    let history = std::sync::Arc::new(tokio::sync::Mutex::new(if cli.synthetic {
+        config::ConnectionHistory::default()
+    } else {
+        config::ConnectionHistory::load()
+    }));
+    let stats = ui::stats::StatsHub::new((!cli.synthetic).then(|| history.clone()));
+    stats.spawn_frame_meter(&frame_bus);
+
     let api_state = std::sync::Arc::new(ui::api::ApiState {
         frame_bus: frame_bus.clone(),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(app_config.clone())),
-        history: std::sync::Arc::new(tokio::sync::Mutex::new(config::ConnectionHistory::default())),
-        stats: std::sync::Arc::new(tokio::sync::Mutex::new(ui::api::StreamStats::default())),
+        history,
+        stats: stats.clone(),
         api_token: api_token.clone(),
         recorder: recorder.clone(),
         replay: replay.clone(),
@@ -376,15 +386,10 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|| synthetic::state::new_shared(info.width, info.height));
         let clock = std::sync::Arc::new(std::time::Instant::now());
 
-        // Pre-populate stats so /api/status reports "connected" and the
-        // dashboard's Status card shows the synthetic device identity.
-        {
-            let mut stats = api_state.stats.lock().await;
-            stats.connected = true;
-            stats.device_name = info.name.clone();
-            stats.resolution = format!("{}x{}", info.width, info.height);
-            stats.fps = 30.0;
-        }
+        // The synthetic device is "connected" for the whole run; FPS,
+        // resolution and frame count come from the frame meter like any
+        // real device.
+        stats.device_connected(&info.udid, &info.name).await;
 
         // Bind the dummy WDA listener up-front so a port-in-use shows up as a
         // hard error here (instead of leaving `IOS_REMOTE_WDA_URL` — which we
@@ -463,7 +468,9 @@ async fn main() -> anyhow::Result<()> {
     let _iproxy = features::iproxy_supervisor::try_spawn(cli.device.as_deref());
 
     // ── USB connection (main task) ──────────────────────────────────────────
-    let receiver = usb::UsbReceiver::new(frame_bus).with_udid(cli.device.clone());
+    let receiver = usb::UsbReceiver::new(frame_bus)
+        .with_udid(cli.device.clone())
+        .with_stats(stats);
     receiver.run().await?;
 
     let _ = display_handle.join();

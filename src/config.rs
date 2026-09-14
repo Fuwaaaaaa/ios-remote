@@ -233,19 +233,38 @@ pub struct ConnectionRecord {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConnectionHistory {
     pub records: Vec<ConnectionRecord>,
+    /// Backing file. `None` (the `Default`) keeps the history in memory only,
+    /// which is what tests and synthetic mode want.
+    #[serde(skip)]
+    path: Option<std::path::PathBuf>,
 }
 
 impl ConnectionHistory {
+    /// Load `connection_history.json` from the working directory; later
+    /// updates are written back to it.
     pub fn load() -> Self {
-        match fs::read_to_string(HISTORY_FILE) {
+        let mut history: Self = match fs::read_to_string(HISTORY_FILE) {
             Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
             Err(_) => Self::default(),
-        }
+        };
+        history.path = Some(std::path::PathBuf::from(HISTORY_FILE));
+        history
     }
 
     pub fn save(&self) {
+        let Some(path) = &self.path else {
+            return;
+        };
         if let Ok(json) = serde_json::to_string_pretty(self) {
-            let _ = fs::write(HISTORY_FILE, json);
+            let _ = fs::write(path, json);
+        }
+    }
+
+    /// Add connected time to an existing record (called when a session ends).
+    pub fn add_duration(&mut self, device_id: &str, duration_secs: u64) {
+        if let Some(record) = self.records.iter_mut().find(|r| r.device_id == device_id) {
+            record.total_duration_secs += duration_secs;
+            self.save();
         }
     }
 

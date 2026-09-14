@@ -37,6 +37,8 @@ pub struct UsbReceiver {
     /// Most recently observed device info. Populated after each successful
     /// lockdownd `GetValue` round-trip and used to enrich stall warnings.
     last_device: Arc<Mutex<Option<DeviceInfo>>>,
+    /// Connection state + history sink for `/api/status` and the dashboard.
+    stats: Option<crate::ui::stats::StatsHub>,
 }
 
 impl UsbReceiver {
@@ -45,11 +47,17 @@ impl UsbReceiver {
             frame_bus,
             preferred_udid: None,
             last_device: Arc::new(Mutex::new(None)),
+            stats: None,
         }
     }
 
     pub fn with_udid(mut self, udid: Option<String>) -> Self {
         self.preferred_udid = udid;
+        self
+    }
+
+    pub fn with_stats(mut self, stats: crate::ui::stats::StatsHub) -> Self {
+        self.stats = Some(stats);
         self
     }
 
@@ -62,7 +70,11 @@ impl UsbReceiver {
         let mut stall_logged_at: Option<std::time::Instant> = None;
 
         loop {
-            match self.connect_and_run_once().await {
+            let outcome = self.connect_and_run_once().await;
+            if let Some(stats) = &self.stats {
+                stats.device_disconnected().await;
+            }
+            match outcome {
                 Ok(()) => {
                     // capture_loop returned Ok → device disconnected cleanly
                     warn!("Device disconnected — waiting for reconnect");
@@ -139,6 +151,7 @@ impl UsbReceiver {
             device.device_id,
             bus,
             Arc::clone(&self.last_device),
+            self.stats.as_ref(),
         )
         .await
     }

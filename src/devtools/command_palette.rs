@@ -627,9 +627,7 @@ mod tests {
             history: std::sync::Arc::new(tokio::sync::Mutex::new(
                 crate::config::ConnectionHistory::default(),
             )),
-            stats: std::sync::Arc::new(tokio::sync::Mutex::new(
-                crate::ui::api::StreamStats::default(),
-            )),
+            stats: crate::ui::stats::StatsHub::new(None),
             api_token: String::new(),
             recorder: crate::features::recording::RecordingController::new(bus.clone()),
             replay: crate::features::session_replay::SessionPlaybackController::new(bus),

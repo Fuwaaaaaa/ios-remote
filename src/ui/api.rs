@@ -22,7 +22,8 @@ pub struct ApiState {
     pub frame_bus: FrameBus,
     pub config: Arc<Mutex<AppConfig>>,
     pub history: Arc<Mutex<ConnectionHistory>>,
-    pub stats: Arc<Mutex<StreamStats>>,
+    /// Live connection state + measured frame statistics.
+    pub stats: crate::ui::stats::StatsHub,
     /// Bearer token required on every /api/* request. Empty string disables auth
     /// (not recommended; used only for internal tests).
     pub api_token: String,
@@ -177,7 +178,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 async fn get_status(State(state): State<Arc<ApiState>>) -> Json<serde_json::Value> {
-    let stats = state.stats.lock().await;
+    let stats = state.stats.snapshot();
     Json(serde_json::json!({
         "status": if stats.connected { "connected" } else { "waiting" },
         "device": stats.device_name,
@@ -186,8 +187,7 @@ async fn get_status(State(state): State<Arc<ApiState>>) -> Json<serde_json::Valu
 }
 
 async fn get_stats(State(state): State<Arc<ApiState>>) -> Json<StreamStats> {
-    let stats = state.stats.lock().await;
-    Json(stats.clone())
+    Json(state.stats.snapshot())
 }
 
 async fn take_screenshot(State(state): State<Arc<ApiState>>) -> Response {
@@ -669,7 +669,7 @@ mod tests {
             frame_bus: bus.clone(),
             config: Arc::new(Mutex::new(AppConfig::default())),
             history: Arc::new(Mutex::new(ConnectionHistory::default())),
-            stats: Arc::new(Mutex::new(StreamStats::default())),
+            stats: crate::ui::stats::StatsHub::new(None),
             api_token: String::new(),
             recorder: RecordingController::new(bus.clone()),
             replay: SessionPlaybackController::new(bus),

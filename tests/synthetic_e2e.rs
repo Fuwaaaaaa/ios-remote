@@ -208,11 +208,22 @@ fn status_reports_synthetic_device_connected() {
 fn stats_report_synthetic_resolution_and_fps() {
     let _proc = spawn_synthetic(38082, 38102);
     wait_until_ready(38082);
+    // FPS is measured over a 1s window, so let at least one window elapse.
+    std::thread::sleep(Duration::from_millis(1600));
     let (code, body) = http_get("http://127.0.0.1:38082/api/stats");
     assert_eq!(code, 200);
     assert!(body.contains("\"resolution\":\"390x844\""), "got: {body}");
-    assert!(body.contains("\"fps\":30"), "got: {body}");
     assert!(body.contains("\"connected\":true"), "got: {body}");
+    let stats: serde_json::Value = serde_json::from_str(&body).expect("stats JSON");
+    let fps = stats["fps"].as_f64().unwrap_or(0.0);
+    // Measured, not hard-coded: the renderer targets 30 FPS, debug builds on
+    // a busy CI runner may render slower, but it must be clearly non-zero.
+    assert!(fps > 5.0 && fps < 45.0, "measured fps out of range: {body}");
+    assert!(
+        stats["frames_received"].as_u64().unwrap_or(0) > 10,
+        "frames_received should count rendered frames: {body}"
+    );
+    assert!(stats["uptime_secs"].as_u64().is_some(), "got: {body}");
 }
 
 #[test]
