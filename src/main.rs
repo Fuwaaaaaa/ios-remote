@@ -30,9 +30,9 @@ use tracing_subscriber::EnvFilter;
     about = "iPhone screen mirroring via USB Type-C (Windows only)"
 )]
 struct Cli {
-    /// Display window name
-    #[arg(short, long, default_value = "ios-remote")]
-    name: String,
+    /// Display window name (default: `[receiver] name` from ios-remote.toml)
+    #[arg(short, long)]
+    name: Option<String>,
 
     /// Web dashboard port
     #[arg(short = 'w', long, default_value_t = 8080)]
@@ -182,9 +182,19 @@ async fn main() -> anyhow::Result<()> {
     //    RTMP with populated `Frame.h264_nalu`). No-op if ffmpeg is missing.
     features::h264_encoder::H264Encoder::new(frame_bus.clone()).spawn();
 
+    // ── RTMP live stream (`[network] rtmp_url`; needs ffmpeg + the encoder) ─
+    if !app_config.network.rtmp_url.trim().is_empty() {
+        tokio::spawn(features::streaming::rtmp_stream(
+            frame_bus.subscribe(),
+            app_config.network.rtmp_url.trim().to_string(),
+        ));
+    }
+
     // ── Recording controller (shared across CLI --record and the REST API) ──
-    let recorder = features::recording::RecordingController::new(frame_bus.clone());
-    if cli.record {
+    let recorder = features::recording::RecordingController::new(frame_bus.clone())
+        .with_output_dir(std::path::PathBuf::from(&app_config.recording.output_dir))
+        .with_max_duration_secs(app_config.recording.max_duration_secs);
+    if cli.record || app_config.recording.auto_record {
         match recorder.start() {
             Ok(path) => {
                 tracing::info!(file = %path.display(), "Recording enabled → {}", path.display())
@@ -197,9 +207,11 @@ async fn main() -> anyhow::Result<()> {
     let replay = features::session_replay::SessionPlaybackController::new(frame_bus.clone());
 
     // ── Display state (shared with dispatch handlers) ───────────────────────
-    let display_state = std::sync::Arc::new(std::sync::Mutex::new(
-        features::display_state::DisplayState::new(),
-    ));
+    let display_state = std::sync::Arc::new(std::sync::Mutex::new({
+        let mut state = features::display_state::DisplayState::new();
+        state.stats_visible = app_config.display.show_stats;
+        state
+    }));
 
     // ── Audio capture + transcription (gated) ───────────────────────────────
     // The transcriber is shared between the capture pump (writes subtitles)
@@ -236,6 +248,7 @@ async fn main() -> anyhow::Result<()> {
                     bus,
                     transcriber.clone(),
                     app_config.audio.chunk_secs,
+                    app_config.audio.language.clone(),
                 );
             }
             let transcriber_opt = if handle.is_some() {
@@ -270,11 +283,20 @@ async fn main() -> anyhow::Result<()> {
     let display_replay = replay.clone();
     let display_state_for_window = display_state.clone();
     let display_transcriber = transcriber.clone();
-    let pip = cli.pip;
+    let display_options = features::display::DisplayOptions {
+        name: cli
+            .name
+            .clone()
+            .unwrap_or_else(|| app_config.receiver.name.clone()),
+        pip: cli.pip || app_config.display.pip_mode,
+        width: app_config.display.window_width as usize,
+        height: app_config.display.window_height as usize,
+        background: app_config.display.background_rgb(),
+    };
     let display_handle = std::thread::spawn(move || {
         features::display::run_display(
             display_bus.subscribe(),
-            pip,
+            display_options,
             display_recorder,
             display_replay,
             display_state_for_window,

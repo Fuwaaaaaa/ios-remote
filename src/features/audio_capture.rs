@@ -264,7 +264,9 @@ pub fn spawn_transcription_pump(
     bus: AudioBus,
     transcriber: Arc<Mutex<Transcriber>>,
     chunk_secs: u32,
+    language: Option<String>,
 ) {
+    let language = super::audio_transcription::sanitize_language(language.as_deref());
     let chunk_secs = chunk_secs.max(1);
     let subtitle_duration_ms = chunk_secs as u64 * 1000;
     tokio::spawn(async move {
@@ -341,8 +343,13 @@ pub fn spawn_transcription_pump(
                             t.now_ms()
                         };
                         let openai_key = std::env::var("OPENAI_API_KEY").ok();
+                        let lang = language.clone();
                         let result = tokio::task::spawn_blocking(move || {
-                            super::audio_transcription::transcribe_blocking(&take, openai_key)
+                            super::audio_transcription::transcribe_blocking(
+                                &take,
+                                openai_key,
+                                lang.as_deref(),
+                            )
                         })
                         .await;
                         match result {

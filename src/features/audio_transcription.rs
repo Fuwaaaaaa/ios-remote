@@ -1,7 +1,5 @@
 use std::time::Instant;
-use tracing::info;
-#[cfg(feature = "whisper")]
-use tracing::warn;
+use tracing::{info, warn};
 
 /// Process-global Whisper context. Loaded lazily on the first call to
 /// [`transcribe_blocking`] inside `tokio::task::spawn_blocking`. `None`
@@ -139,9 +137,26 @@ impl Transcriber {
 /// via `add_subtitle` — this keeps the heavy work outside the lock so
 /// the display loop and `/api/*` handlers aren't blocked during
 /// inference.
+/// Normalize the `[audio] language` setting to a bare ISO-639 code
+/// (`"ja"`, `"en"`, `"yue"`). Anything else is dropped with a warning so a
+/// typo can't smuggle extra directives into the curl config.
+pub fn sanitize_language(raw: Option<&str>) -> Option<String> {
+    let lang = raw?.trim().to_ascii_lowercase();
+    if lang.is_empty() || lang == "auto" {
+        return None;
+    }
+    if (2..=3).contains(&lang.len()) && lang.chars().all(|c| c.is_ascii_lowercase()) {
+        Some(lang)
+    } else {
+        warn!(language = %lang, "Ignoring invalid audio.language (expected e.g. \"ja\")");
+        None
+    }
+}
+
 pub fn transcribe_blocking(
     pcm_16k_mono: &[f32],
     openai_api_key: Option<String>,
+    language: Option<&str>,
 ) -> Result<String, String> {
     #[cfg(feature = "whisper")]
     {
@@ -153,7 +168,7 @@ pub fn transcribe_blocking(
             }
         });
         if let Some(ctx) = ctx_slot {
-            match run_whisper(ctx, pcm_16k_mono) {
+            match run_whisper(ctx, pcm_16k_mono, language) {
                 Ok(text) => return Ok(text),
                 Err(e) => {
                     tracing::debug!(error = %e, "local whisper failed; trying OpenAI API");
@@ -171,7 +186,7 @@ pub fn transcribe_blocking(
     let temp = std::env::temp_dir().join(format!("ios_remote_audio_{}.wav", std::process::id()));
     std::fs::write(&temp, &wav).map_err(|e| e.to_string())?;
 
-    let result = run_openai_curl(&api_key, &temp);
+    let result = run_openai_curl(&api_key, &temp, language);
 
     if std::env::var_os("IOS_REMOTE_KEEP_AUDIO_TMP").is_none() {
         let _ = std::fs::remove_file(&temp);
@@ -189,7 +204,11 @@ pub fn transcribe_blocking(
 /// On Windows other local users (and any tool that lists processes) can
 /// read command lines, so passing the secret via `-H "Authorization: …"`
 /// is a real exposure path. `-K -` reads the config from stdin instead.
-fn run_openai_curl(api_key: &str, wav_path: &std::path::Path) -> Result<String, String> {
+fn run_openai_curl(
+    api_key: &str,
+    wav_path: &std::path::Path,
+    language: Option<&str>,
+) -> Result<String, String> {
     use std::io::Write;
     use std::process::{Command, Stdio};
 
@@ -201,7 +220,7 @@ fn run_openai_curl(api_key: &str, wav_path: &std::path::Path) -> Result<String, 
     let safe_key = escape_curl_config_value(api_key);
     let safe_path = escape_curl_config_value(&wav_str);
 
-    let config = format!(
+    let mut config = format!(
         "silent\n\
          request = \"POST\"\n\
          url = \"https://api.openai.com/v1/audio/transcriptions\"\n\
@@ -210,6 +229,10 @@ fn run_openai_curl(api_key: &str, wav_path: &std::path::Path) -> Result<String, 
          form = \"model=whisper-1\"\n\
          form = \"response_format=text\"\n"
     );
+    // `language` is pre-validated to [a-z]{2,3} by `sanitize_language`.
+    if let Some(lang) = language {
+        config.push_str(&format!("form = \"language={lang}\"\n"));
+    }
 
     let mut child = Command::new("curl")
         .arg("-K")
@@ -262,12 +285,18 @@ fn load_whisper_context() -> Result<whisper_rs::WhisperContext, String> {
 }
 
 #[cfg(feature = "whisper")]
-fn run_whisper(ctx: &whisper_rs::WhisperContext, samples: &[f32]) -> Result<String, String> {
+fn run_whisper(
+    ctx: &whisper_rs::WhisperContext,
+    samples: &[f32],
+    language: Option<&str>,
+) -> Result<String, String> {
     use whisper_rs::{FullParams, SamplingStrategy};
     let mut state = ctx
         .create_state()
         .map_err(|e| format!("whisper state: {e}"))?;
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    // `None` keeps whisper's auto-detection.
+    params.set_language(language);
     params.set_translate(false);
     params.set_print_progress(false);
     params.set_print_special(false);
@@ -323,6 +352,17 @@ fn wrap_two_lines(text: &str, max_chars: usize) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn language_setting_is_validated() {
+        assert_eq!(sanitize_language(Some("ja")), Some("ja".into()));
+        assert_eq!(sanitize_language(Some(" EN ")), Some("en".into()));
+        assert_eq!(sanitize_language(Some("auto")), None);
+        assert_eq!(sanitize_language(None), None);
+        // Anything that could break out of a curl config line is rejected.
+        assert_eq!(sanitize_language(Some("ja\"\nurl = evil")), None);
+        assert_eq!(sanitize_language(Some("japanese")), None);
+    }
 
     #[test]
     fn wrap_short_fits_single_line() {

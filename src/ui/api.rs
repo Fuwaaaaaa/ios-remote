@@ -228,8 +228,8 @@ async fn stop_recording(State(state): State<Arc<ApiState>>) -> Response {
 
 // ─── Replay handlers ─────────────────────────────────────────────────────────
 
-async fn list_replay_sessions() -> Json<serde_json::Value> {
-    let sessions: Vec<serde_json::Value> = list_sessions("recordings")
+async fn list_replay_sessions(State(state): State<Arc<ApiState>>) -> Json<serde_json::Value> {
+    let sessions: Vec<serde_json::Value> = list_sessions(state.recorder.output_dir())
         .into_iter()
         .filter_map(|p| {
             let header_path = p.join("session.json");
@@ -313,10 +313,14 @@ async fn update_config(
     Json(new_config): Json<AppConfig>,
 ) -> Json<serde_json::Value> {
     let mut config = state.config.lock().await;
-    *config = new_config.clone();
+    *config = new_config.into_persistent();
     config.save();
     info!("Config updated via API");
-    Json(serde_json::json!({ "status": "updated" }))
+    // Settings are read at startup; say so instead of implying a live change.
+    Json(serde_json::json!({
+        "status": "updated",
+        "restart_required": true,
+    }))
 }
 
 async fn get_history(State(state): State<Arc<ApiState>>) -> Json<ConnectionHistory> {

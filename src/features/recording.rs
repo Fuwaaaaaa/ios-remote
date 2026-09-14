@@ -28,7 +28,7 @@ pub async fn run(rx: broadcast::Receiver<Arc<Frame>>) {
         }
     };
     let active = Arc::new(AtomicBool::new(true));
-    let _ = record_inner(rx, path, active).await;
+    let _ = record_inner(rx, path, active, None).await;
 }
 
 /// Single-flight recording controller shared across API handlers.
@@ -37,9 +37,11 @@ pub struct RecordingController {
     active: Arc<AtomicBool>,
     current_path: Arc<std::sync::Mutex<Option<PathBuf>>>,
     frame_bus: FrameBus,
-    /// Directory for new recordings. Defaults to `recordings/`; tests override
-    /// via `with_output_dir` so they can use per-run temp dirs.
+    /// Directory for new recordings. Defaults to `recordings/`; configured by
+    /// `[recording] output_dir`, and tests use per-run temp dirs.
     output_dir: PathBuf,
+    /// `[recording] max_duration_secs`; `None` = unlimited.
+    max_duration: Option<Duration>,
 }
 
 impl RecordingController {
@@ -49,6 +51,7 @@ impl RecordingController {
             current_path: Arc::new(std::sync::Mutex::new(None)),
             frame_bus,
             output_dir: PathBuf::from("recordings"),
+            max_duration: None,
         }
     }
 
@@ -56,6 +59,17 @@ impl RecordingController {
     pub fn with_output_dir(mut self, dir: PathBuf) -> Self {
         self.output_dir = dir;
         self
+    }
+
+    /// Stop recordings automatically after `secs` seconds (0 = unlimited).
+    #[must_use]
+    pub fn with_max_duration_secs(mut self, secs: u64) -> Self {
+        self.max_duration = (secs > 0).then(|| Duration::from_secs(secs));
+        self
+    }
+
+    pub fn output_dir(&self) -> &std::path::Path {
+        &self.output_dir
     }
 
     pub fn is_active(&self) -> bool {
@@ -86,8 +100,9 @@ impl RecordingController {
         let active = self.active.clone();
         let path_for_task = path.clone();
         let current_path = self.current_path.clone();
+        let max_duration = self.max_duration;
         tokio::spawn(async move {
-            let _ = record_inner(rx, path_for_task, active.clone()).await;
+            let _ = record_inner(rx, path_for_task, active.clone(), max_duration).await;
             // Ensure flag + path slot are cleared even on early exit.
             active.store(false, Ordering::SeqCst);
             if let Ok(mut slot) = current_path.lock() {
@@ -123,13 +138,20 @@ async fn record_inner(
     mut rx: broadcast::Receiver<Arc<Frame>>,
     path: PathBuf,
     active: Arc<AtomicBool>,
+    max_duration: Option<Duration>,
 ) -> Result<(), String> {
     let mut file = fs::File::create(&path).map_err(|e| format!("create {path:?}: {e}"))?;
     info!(file = %path.display(), "Recording started");
     let mut frame_count: u64 = 0;
+    let started = std::time::Instant::now();
 
     loop {
         if !active.load(Ordering::SeqCst) {
+            break;
+        }
+        if max_duration.is_some_and(|max| started.elapsed() >= max) {
+            info!(file = %path.display(), "Recording reached max_duration_secs — stopping");
+            active.store(false, Ordering::SeqCst);
             break;
         }
         tokio::select! {
