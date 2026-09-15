@@ -162,6 +162,10 @@ pub fn default_wda_client() -> WdaClient {
 mod tests {
     use super::*;
 
+    /// Serializes every test that writes `IOS_REMOTE_WDA_URL`: the env is
+    /// process-global, so the lock must be shared, not one per test.
+    static WDA_URL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn new_stores_base_url() {
         let c = WdaClient::new("http://example:9000");
@@ -171,11 +175,9 @@ mod tests {
 
     #[test]
     fn default_client_honors_env_var() {
-        // Serialize via a mutex since env is process-global.
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = WDA_URL_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let prev = std::env::var("IOS_REMOTE_WDA_URL").ok();
-        // SAFETY: serialized by LOCK above; restored in this test.
+        // SAFETY: serialized by WDA_URL_ENV_LOCK; restored in this test.
         unsafe { std::env::set_var("IOS_REMOTE_WDA_URL", "http://override:12345") };
         let c = default_wda_client();
         assert_eq!(c.base_url, "http://override:12345");
@@ -187,10 +189,9 @@ mod tests {
 
     #[test]
     fn default_client_falls_back_to_localhost_8100() {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = WDA_URL_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let prev = std::env::var("IOS_REMOTE_WDA_URL").ok();
-        // SAFETY: serialized by LOCK; value restored at end.
+        // SAFETY: serialized by WDA_URL_ENV_LOCK; value restored at end.
         unsafe { std::env::remove_var("IOS_REMOTE_WDA_URL") };
         let c = default_wda_client();
         assert_eq!(c.base_url, "http://127.0.0.1:8100");

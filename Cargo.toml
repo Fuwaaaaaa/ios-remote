@@ -48,7 +48,8 @@ minifb = "0.28"
 # (RUSTSEC-2024-0436). We don't read AVIF templates, so explicitly opt
 # in to the rest of `default-formats` minus `avif` and keep `rayon`.
 image = { version = "0.25", default-features = false, features = ["rayon", "bmp", "dds", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp"] }
-rqrr = "0.10"
+# 0.11 moves to lru 0.18 (RUSTSEC-2026-0253 is fixed in lru >= 0.18.2).
+rqrr = "0.11"
 gif = "0.13"
 arboard = "3"
 tracing = "0.1"
@@ -79,3 +80,8 @@ cpal = { version = "0.15", optional = true }
 # service we currently use; defer tunneld/core_device_proxy/mobile_image_mounter
 # until DDI / iOS 18+ work begins (see Stage C-4..C-7 in the plan).
 idevice = { version = "=0.1.58", default-features = false, features = ["usbmuxd", "tcp", "aws-lc", "screenshotr"], optional = true }
+
+[dev-dependencies]
+# Encodes QR codes for the qr_scanner round-trip test. No default features:
+# the test only needs the module matrix, not image/svg rendering.
+qrcode = { version = "0.14", default-features = false }

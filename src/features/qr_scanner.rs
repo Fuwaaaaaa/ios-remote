@@ -69,3 +69,66 @@ fn rgba_to_gray(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
     }
     gray
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qrcode::{Color, QrCode};
+
+    /// Render `text` as an RGBA frame: 8px per module, 4-module quiet zone,
+    /// dark modules black on a white background.
+    fn qr_frame(text: &str) -> Frame {
+        const SCALE: usize = 8;
+        const QUIET: usize = 4;
+        let code = QrCode::new(text.as_bytes()).unwrap();
+        let modules = code.width();
+        let colors = code.to_colors();
+        let side = (modules + 2 * QUIET) * SCALE;
+        let mut rgba = vec![0xFF; side * side * 4];
+        for (i, color) in colors.iter().enumerate() {
+            if *color != Color::Dark {
+                continue;
+            }
+            let (mx, my) = (i % modules + QUIET, i / modules + QUIET);
+            for y in my * SCALE..(my + 1) * SCALE {
+                for x in mx * SCALE..(mx + 1) * SCALE {
+                    let p = (y * side + x) * 4;
+                    rgba[p..p + 3].fill(0);
+                }
+            }
+        }
+        Frame {
+            width: side as u32,
+            height: side as u32,
+            rgba,
+            timestamp_us: 0,
+            h264_nalu: None,
+        }
+    }
+
+    #[test]
+    fn decodes_a_rendered_qr_code() {
+        let text = "https://github.com/Fuwaaaaaa/ios-remote";
+        assert_eq!(scan_qr_codes(&qr_frame(text)), vec![text.to_string()]);
+    }
+
+    #[test]
+    fn blank_and_empty_frames_have_no_codes() {
+        let blank = Frame {
+            width: 64,
+            height: 64,
+            rgba: vec![0xFF; 64 * 64 * 4],
+            timestamp_us: 0,
+            h264_nalu: None,
+        };
+        assert!(scan_qr_codes(&blank).is_empty());
+        let empty = Frame {
+            width: 0,
+            height: 0,
+            rgba: Vec::new(),
+            timestamp_us: 0,
+            h264_nalu: None,
+        };
+        assert!(scan_qr_codes(&empty).is_empty());
+    }
+}
