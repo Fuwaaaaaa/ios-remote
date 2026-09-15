@@ -62,7 +62,7 @@ INFO  Web dashboard: http://127.0.0.1:8080
 ```
 
 - 既定は `127.0.0.1` にのみバインドするため、同じ PC の Web ブラウザからのみ到達可能です。
-- `--lan` を付けると `0.0.0.0` にバインドし、LAN の他ホストからもアクセスできます。その際 API トークンは必須です。
+- `--lan` を付けると `0.0.0.0` にバインドし、LAN の他ホストからもアクセスできます。その際 API トークンは必須です。ダッシュボードにトークンが埋め込まれるのは同じ PC から `localhost` / `127.0.0.1` で開いたときだけなので、他のホストではトークンを貼り付けてください（`http://<PC>:8080/#token=<トークン>` で開いても使えます）。
 - トークンは `IOS_REMOTE_API_TOKEN` 環境変数で上書き、または `ios-remote.toml` の `[network] api_token` で固定できます。
 
 ### 必要なもの
@@ -119,8 +119,11 @@ ios-remote.exe --diag
 
 iPhone を物理接続しなくても ios-remote のパイプライン全体 — ディスプレイ
 窓・録画・スクリーンショット・OCR・AI ビジョン・Session Replay・REST
-API・マクロ・字幕 — を一通り動かせます。開発・デモ・CI、そして iOS 17+
-ハードウェアキャプチャ (Stage C-7) 実装中の代替として有用。
+API・マクロ・字幕 — を一通り動かせます。擬似デバイスは**操作できます**:
+WDA 経由の入力で画面が実際に変わるので、実機なしでアプリ全体を操作・
+デモできます。開発・デモ・CI（**Windows** ランナー — `build.rs` により
+表示レイヤーは Windows 専用）、そして iOS 17+ ハードウェアキャプチャ
+(Stage C-7) 実装中の代替として有用。
 
 ```bash
 cargo run --release -- --synthetic
@@ -129,17 +132,27 @@ cargo run --release -- --synthetic
 
 起動時の挙動:
 
-- 33ms ごとに 390x844 の RGBA フレームを生成（黒のステータスバー＋
-  時計＋LTE＋100% バッテリー、ネイビー〜パープルのグラデーション壁紙、
-  4x6 カラーアプリアイコングリッド A–X、30 秒周期の通知バナー、
-  右下にフレームカウンタ）。
+- 33ms ごとに 390x844 の RGBA フレームを生成。ホーム画面は黒の
+  ステータスバー（時計＋LTE＋100% バッテリー）、ネイビー〜パープルの
+  グラデーション壁紙、スワイプできる 4x6 カラーアプリアイコングリッド、
+  ページドット、周期的な通知バナー、フレームカウンタで構成されます。
+- **操作できます。** アプリアイコンをタップ（マクロまたは WDA スタブ経由）
+  するとそのアプリ画面が開き、戻るボタンや下部のホームインジケータを
+  タップするとグリッドに戻ります。横スワイプでホームのページ切替、
+  縦スワイプで開いたアプリのスクロール、長押しでハイライト表示。
+  スクリーンショット / OCR / AI / 録画には、そのとき画面に出ている
+  内容が写ります。
 - `/api/status` が `connected: true` を返し、device は
   `Synthetic iPhone`、iOS `17.5`、UDID `SYNTHETIC-…`。
+- `/api/synthetic/state`（synthetic モード限定）で擬似デバイスの状態を
+  読み取れます: 現在の `screen`（`home`/`app`）、開いている `app`、
+  `page`、`app_scroll`、`interactions` 回数。
 - `/api/screenshot`, `/api/recording/start`, `/api/ocr`,
   `/api/ai/describe`, `/api/replay/*` のいずれも実機モードと同じ挙動。
 - ダミー WebDriverAgent スタブが `127.0.0.1:8101` で待ち受けるので
-  `/api/macros/run` の tap/swipe も成功します（入力は実機に届かず
-  ログ出力のみ）。
+  `/api/macros/run` の tap/swipe も成功し、擬似画面に反映されます。
+  `Repeat` や `WaitForScreen`（ライブフレームに対するテンプレート
+  マッチング）を含め、マクロエンジン全体がここで動作します。
 - `/api/subtitles` には 5 秒周期で英語プレースホルダ字幕が流れます。
 
 フラグの優先順位:
@@ -148,8 +161,8 @@ cargo run --release -- --synthetic
 |---|---|
 | `--synthetic --device <UDID>` | `--device` は警告付きで無視。 |
 | `--synthetic --diag` | `--diag` が従来通り実行（synthetic は無視）。 |
-| `--synthetic --record` | 起動と同時に録画開始（H.264 出力には ffmpeg 必須／lifecycle 自体は ffmpeg なしでも 200）。 |
-| `--synthetic --lan` | Web ダッシュボードを `0.0.0.0` で公開（Bearer トークン必須）。 |
+| `--synthetic --record` | 起動と同時に録画開始。`PATH` 上に ffmpeg が必要で、ない場合は警告を出して録画しません。 |
+| `--synthetic --lan` | Web ダッシュボードを `0.0.0.0` で公開（Bearer トークン必須。他ホストではダッシュボードにトークンを貼り付け）。 |
 | `--synthetic-wda-port <PORT>` | ダミー WDA のバインドポートを `8101` から変更可能。 |
 
 実機なし e2e スモーク: `cargo test --test synthetic_e2e --
@@ -242,7 +255,7 @@ recording / subtitles / WDA stub を約 3 秒で踏破します。
 | 「信用できるデバイス」エラー / 「信頼」をタップしても画面が出ない | iOS 17 以降の構造的非対応の可能性が高いです。`ios-remote.exe --diag` で lockdownd レスポンスを確認してください。本ビルドは StartSession / TLS / DDI mount を未実装で、iPhone 上で「信頼」をタップしても挙動は変わりません。**Stage C-7 完成までは `--synthetic`** で開発を続けられます。 |
 | 画面が固まる | USB-C ケーブルがデータ通信対応か（充電専用ケーブルでは動きません） |
 | 起動直後に自動再接続を繰り返す | `--list-devices` で UDID を確認し、`--device <UDID>` で固定 |
-| ブラウザで Web Dashboard に `401 Unauthorized` | 起動ログの API token を確認、URL 直打ちではなく `/` から開くかヘッダ付きで叩く |
+| ブラウザで Web Dashboard に `401 Unauthorized` | 起動ログの API token（または `ios-remote.toml` の `[network] api_token`）を確認。同じ PC なら `http://127.0.0.1:8080/` を開けばトークンが埋め込まれます。他のホストからはダッシュボードのトークン入力欄に貼り付けてください |
 | `Failed to bind Web dashboard` | `-w <PORT>` で別ポートを指定 |
 | 複数 iPhone を同時接続したい | 現時点では 1 台ずつ。`--device` で切り替え |
 | マクロ実行時に `WDA not reachable` | `--synthetic` ならダミー WDA スタブが `127.0.0.1:8101` に立つのでマクロが完走します。実機での入力送信は §[Macro setup](#macro-setup-ios-入力送信) を参照 |
@@ -259,7 +272,7 @@ recording / subtitles / WDA stub を約 3 秒で踏破します。
 
 WDA が起動していない場合、`Tap`/`Swipe`/`LongPress` アクションはエラーで返りますが、プロセスは落ちません（`Wait` や `Screenshot` アクションは引き続き動きます）。
 
-> **WDA なしでマクロをテストしたい場合は** `--synthetic` を使ってください。起動と同時に `IOS_REMOTE_WDA_URL` がダミー WDA スタブ (`127.0.0.1:8101`) に上書きされ、`/session` / `/tap/0` / `/dragfromtoforduration` / `/touchAndHold` に対して HTTP 200 を返します。入力内容は stdout にログ出力されるので、マクロエンジンが正しく発火したかを開発者署名 WDA なしで確認できます。ポートは `--synthetic-wda-port <PORT>` で変更可能。
+> **WDA なしでマクロをテストしたい場合は** `--synthetic` を使ってください。起動と同時に `IOS_REMOTE_WDA_URL` がダミー WDA スタブ (`127.0.0.1:8101`) に上書きされ、`/session` / `/tap/0` / `/dragfromtoforduration` / `/touchAndHold` に対して HTTP 200 を返します。入力は**擬似画面に反映される**ので（タップでアプリが開く、スワイプでページ切替、ホームインジケータでホームに戻る）、`GET /api/synthetic/state` で結果を確認でき、開発者署名 WDA は不要です。`Repeat` や `WaitForScreen`（ライブの擬似フレームに対してテンプレートを照合）を含め、エンジン全体がここで動作します。ポートは `--synthetic-wda-port <PORT>` で変更可能。
 
 ## Session Replay
 
@@ -267,7 +280,7 @@ WDA が起動していない場合、`Tap`/`Swipe`/`LongPress` アクション�
 
 ### 手順
 
-1. `F2` または `POST /api/recording/start` でセッションを記録 → 停止で `recordings/session_YYYYMMDD_HHMMSS/` が作成されます
+1. `F2` または `POST /api/recording/start` でセッションを記録 → `recordings/session_YYYYMMDD_HHMMSS_ffffff/` が作成されます（保存先は `[recording] output_dir`）。録画中に `POST /api/recording/bookmark`（`{ "label": "…" }`）でシーク用ブックマークを追加できます
 2. Dashboard を開き、Replay カードの **Refresh** で一覧を更新
 3. セッションを選択して **Load** → ヘッダ情報 (解像度 / フレーム数 / 長さ) とブックマークが表示されます
 4. **Play** で再生開始、**Pause** で停止
@@ -275,17 +288,19 @@ WDA が起動していない場合、`Tap`/`Swipe`/`LongPress` アクション�
 
 ### ffmpeg 依存
 
-デコードは ffmpeg サブプロセス (`-f h264 -i pipe:0 -f rawvideo -pix_fmt rgba pipe:1`) で行います。未インストールの場合 `POST /api/replay/play` は `{ "status": "error", "error": "spawn ffmpeg: ..." }` を返します。下の Optional Dependencies 参照。
+デコードは ffmpeg サブプロセス (`-f h264 -i pipe:0 -f rawvideo -pix_fmt rgba pipe:1`) で行います。未インストールの場合 `POST /api/replay/play` は `409` と `{ "status": "error", "error": "spawn ffmpeg: ..." }` を返します。下の Optional Dependencies 参照。
 
 ### 既知の制限
 
 - シーク位置は比例マッピング (NAL 単位、タイムスタンプ精度は粗い)
 - 再生速度は 1.0× 固定
-- ffmpeg 未インストール時は録画 / Replay / RTMP がすべて no-op になります (エンコーダも ffmpeg を使うため)
+- ffmpeg 未インストール時は、録画は拒否され（`POST /api/recording/start` → `503`）、Replay は再生できず、RTMP 配信も始まりません (エンコーダも ffmpeg を使うため)
 
 ## Web Dashboard
 
-ブラウザで `http://localhost:8080` を開くとリアルタイムダッシュボードが使えます。トークンはダッシュボード HTML にインラインで埋め込まれ、fetch 呼び出しに自動付与されます。カード構成: Status / Actions / Replay / Log / Connection History。
+ブラウザで `http://localhost:8080` を開くとリアルタイムダッシュボードが使えます。カード構成: Status / Actions / Replay / Log / Connection History。
+
+ページは API トークンを fetch 呼び出しに自動で付けます。トークンを HTML に埋め込むのは同じ PC からのリクエスト（接続元が loopback **かつ** `Host` ヘッダーが `localhost` / loopback IP）の場合だけです。他のホストから開いた場合（`--lan` など）はトークン入力欄が表示され、貼り付けたトークンはそのタブの `sessionStorage` に保持されます。`#token=<トークン>` の URL フラグメントも使え、これはサーバーには送信されません。
 
 ### REST API
 
@@ -296,6 +311,7 @@ WDA が起動していない場合、`Tap`/`Swipe`/`LongPress` アクション�
 | `/api/screenshot` | POST | スクリーンショット撮影 |
 | `/api/recording/start` | POST | 録画開始 |
 | `/api/recording/stop` | POST | 録画停止 |
+| `/api/recording/bookmark` | POST | 録画中のセッションにシーク用ブックマークを追加（`{ "label": "…" }`） |
 | `/api/ocr` | POST | テキスト抽出 |
 | `/api/ai/describe` | POST | AI画面解析 |
 | `/api/config` | GET/POST | 設定読み書き |
@@ -311,6 +327,9 @@ WDA が起動していない場合、`Tap`/`Swipe`/`LongPress` アクション�
 | `/api/subtitles` | GET | 字幕履歴 (最大 50 件) |
 | `/api/commands` | GET | Command Palette 全コマンド一覧 |
 | `/api/command/{id}` | POST | Command Palette のアクションを dispatch |
+| `/api/synthetic/state` | GET | 擬似デバイスの状態（`--synthetic` 時のみ。それ以外は `503`） |
+
+すべての `/api/*` リクエストに `Authorization: Bearer <トークン>` が必要です。エラーは対応する HTTP ステータスと JSON ボディ `{ "status": "error", "error": "<メッセージ>" }` で返ります。例: フレーム未受信や依存（ffmpeg、`ANTHROPIC_API_KEY`、WebDriverAgent）がない場合は `503`、状態が競合する場合（録画中に開始、録画していないのに停止）は `409`、入力が不正な場合は `400`。
 
 ### Command Palette dispatch
 
@@ -342,30 +361,34 @@ REST や Stream Deck から状態が変わってもタイトルが追従する�
 
 ## Configuration
 
-`ios-remote.toml` で設定をカスタマイズ:
+`ios-remote.toml` で設定をカスタマイズできます。セクションもキーもすべて省略可能で、変えたいものだけ書けば残りは既定値になります。未知のキー（`[features]` など過去のリリースで削除されたものを含む）は無視され、パースに失敗したファイルは上書きされません。編集後は再起動してください（`POST /api/config` も反映には再起動が必要です）。
 
 ```toml
 [receiver]
-name = "ios-remote"
+name = "ios-remote"            # ウィンドウタイトル（--name で上書き）
 
 [display]
-pip_mode = false
-show_stats = true
-show_touch_overlay = true
+pip_mode = false               # 起動時に常に最前面（--pip と同じ）
+window_width = 960
+window_height = 540
+show_stats = false             # FPS / 解像度オーバーレイ（F4 で切替）
+background_color = "#222222"   # 最初のフレームが届くまでの背景色
 
 [recording]
-auto_record = false
-output_dir = "recordings"
+auto_record = false            # --record と同じ（ffmpeg が必要）
+output_dir = "recordings"      # Replay カードもここを参照
+max_duration_secs = 0          # 0 = 無制限
 
 [network]
-bind_address = "127.0.0.1"   # "0.0.0.0" にすると LAN 公開。--lan でも同等
-lan_access = false            # true にすると bind_address を強制的に 0.0.0.0 扱いに
-api_token = ""                # 空で起動すると自動生成してここに書き込まれます
+bind_address = "127.0.0.1"     # "0.0.0.0" にすると LAN 公開。--lan でも同等
+lan_access = false             # true にすると bind_address を強制的に 0.0.0.0 扱いに
+api_token = ""                 # 空で起動すると自動生成してここに書き込まれます
+rtmp_url = ""                  # 例: "rtmp://live.twitch.tv/app/<key>" で ffmpeg 経由の配信
 
-[features]
-notification_capture = true
-ocr = false
-ai_vision = false
+[audio]
+source = "loopback"            # "loopback" | "mic" | "off"
+chunk_secs = 5
+# language = "ja"              # 省略時は Whisper の自動判定
 ```
 
 ## Architecture
@@ -423,7 +446,7 @@ ai_vision = false
 | ツール | 用途 | インストール |
 |--------|------|-------------|
 | tesseract-ocr | OCRテキスト抽出 | [tesseract](https://github.com/tesseract-ocr/tesseract) |
-| ffmpeg | RTMP配信 / 録画変換 / セッションリプレイのデコード | [ffmpeg.org](https://ffmpeg.org) |
+| ffmpeg | 録画（必須）/ RTMP配信 / セッションリプレイのデコード | [ffmpeg.org](https://ffmpeg.org) |
 | `ANTHROPIC_API_KEY` | AI画面理解 | [anthropic.com](https://console.anthropic.com) |
 | `OPENAI_API_KEY` | 音声文字起こし（OpenAI Whisper API） | [openai.com](https://platform.openai.com) |
 | `IMGUR_CLIENT_ID` | Imgur即共有 | [imgur.com/account/settings/apps](https://imgur.com/account/settings/apps) |
@@ -508,9 +531,11 @@ src/
 │   └── throttle.rs       Bandwidth control
 ├── synthetic/           --synthetic モード (実機 iPhone なし, v0.8.0+)
 │   ├── mod.rs           エントリ、SyntheticDeviceInfo、タスク spawn
-│   ├── renderer.rs      30 FPS iPhone 風モック画面レンダラ
+│   ├── layout.rs        ホームグリッドの配置＋タップ判定（共通）
+│   ├── state.rs         操作可能な DeviceState と入力による状態遷移
+│   ├── renderer.rs      30 FPS レンダラ、状態から現在の画面を描画
 │   ├── subtitle_pump.rs 5秒周期で擬似字幕を Transcriber に push
-│   └── wda_stub.rs      ダミー WebDriverAgent (127.0.0.1:8101)
+│   └── wda_stub.rs      ダミー WDA (127.0.0.1:8101)、入力を状態に反映
 └── idevice/             USB device integration (stubs)
     ├── device_info.rs     Device info
     ├── file_transfer.rs   File transfer (AFC)
