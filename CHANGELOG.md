@@ -6,12 +6,62 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Interactive Synthetic Mode — `--synthetic` graduates from a passive demo
-animation into a usable, finished-product emulator. Input now drives the
-screen, so the entire app can be operated and demonstrated without any
-hardware.
+## [0.8.1] — 2026-09-15
+
+Security and audit-fix release. **Upgrade now if you run with `--lan`:**
+in v0.8.0 and earlier, any host that can reach the dashboard can read the
+API token from `GET /` and then drive every `/api/*` endpoint.
+
+Also in this release: fixes from a hands-on audit of v0.8.0 (REST status
+codes, stats, config loading, recording/replay, AI vision on real screens),
+the interactive synthetic mode, and a clean `cargo audit`.
+
+### Security
+- **API token no longer leaks from `GET /`.** The dashboard route sits
+  outside the bearer middleware and inlined the token into its HTML for
+  every caller. The token is now inlined only when the TCP peer is
+  loopback **and** the `Host` header names a loopback host (which also
+  defeats DNS rebinding). Anyone else gets the page without a token and a
+  prompt to paste it; it is kept in `sessionStorage`, or can be passed as
+  a `#token=` URL fragment (never sent to the server).
+- **Secrets stay off process command lines.** Outbound HTTP (Claude API,
+  WebDriverAgent, translate, OpenAI transcription, update check) goes
+  through a shared `curl -K -` client: API keys and request bodies are
+  passed via stdin / a self-deleting temp file instead of `argv`.
+- **Macro names are validated** before `/api/macros/run` touches the
+  filesystem (no path traversal).
+- RTMP stream keys are redacted in logs.
+
+### Upgrade notes (behavior changes)
+- **REST errors now use real HTTP status codes** with a JSON body
+  `{ "status": "error", "error": "…" }` instead of HTTP 200: OCR `500`;
+  AI describe `400` (invalid JSON) / `503` (no `ANTHROPIC_API_KEY` or no
+  frame) / `502` (API error or refusal); recording
+  start `409` (already recording) / `503` (ffmpeg missing), stop `409`
+  when idle; replay load `400`, play / seek `409`; macros run `400`
+  (invalid) / `404` (unknown) / `409` (already running) / `503` (WDA
+  unreachable); screenshot / analysis commands `503` before the first
+  frame. `POST /api/command/quit` answers `202` before exiting.
+- **Opening the dashboard from another host** (e.g. with `--lan`) now
+  asks for the API token — see *Security*.
+- **Recording requires ffmpeg.** `POST /api/recording/start` (and
+  `--record`) refuses with `503` / a warning instead of reporting success
+  and writing an empty file.
+- **Config keys without an implementation were removed:**
+  `receiver.port`, `receiver.max_width` / `max_height` / `max_fps` (AirPlay
+  leftovers), `display.show_touch_overlay`, and the whole `[features]`
+  table. Existing files still load; unknown keys are ignored.
 
 ### Added
+- **`POST /api/recording/bookmark`** `{ "label": "…" }` adds a seek
+  bookmark to the active recording; bookmarks show up as seek buttons in
+  the Replay card.
+- **Config keys that now take effect:** `receiver.name` (window title,
+  overridable by `--name`), `display.pip_mode` / `window_width` /
+  `window_height` / `show_stats` / `background_color`,
+  `recording.auto_record` / `output_dir` (also where Replay looks) /
+  `max_duration_secs`, `network.rtmp_url` (starts the ffmpeg RTMP push),
+  and `audio.language` (passed to whisper.cpp and the OpenAI API).
 - **Interactive synthetic device.** A shared `DeviceState`
   (`src/synthetic/state.rs`) is mutated by the WDA stub on every
   tap/swipe/long-press and read by the renderer each frame. Tapping a
@@ -39,8 +89,51 @@ hardware.
   shares the main runtime, so running there could starve the very stub the
   macro calls (loopback request → no response → timeout). Isolation keeps
   the blocking I/O off the main workers.
+- **Blocking work leaves the async workers.** tesseract, curl, PNG encoding
+  and Command Palette dispatch run on `spawn_blocking`.
+- **Macro runs report their outcome.** `/api/macros/run` fails fast when
+  WebDriverAgent is unreachable, rejects overlapping runs, and records the
+  result as `last_run` on `GET /api/macros`. The `Screenshot` action now
+  actually saves a PNG.
+- **AI describe** accepts an empty body, scales frames to the API's
+  2576 px long-edge limit, targets `claude-opus-5`, and reports refusals /
+  API errors instead of returning them as a description.
+- **Recordings are replayable sessions.** Recording writes
+  `session_<timestamp>/{video.h264, session.json, bookmarks.json}` — the
+  layout the Replay card lists — and flushes metadata every 5 s, so a
+  crash still leaves a loadable session. The unused `SessionRecorder` is
+  gone.
+- **Replay owns the screen while it plays:** live capture frames are
+  dropped, so the display and encoder no longer interleave two streams.
+- `POST /api/config` reports `restart_required: true`.
 
 ### Fixed
+- **REST screenshot / OCR / AI / QR / translate failed whenever ffmpeg was
+  installed**, because the H.264 encoder republished image-less frames as
+  the "latest" frame. Only frames carrying RGBA are tracked now.
+- **Real-device stats were never reported.** `/api/status` stayed on
+  "waiting", FPS / frames / bitrate read 0, and the dashboard never left
+  "Waiting for iPhone…". Stats are now measured from frames that actually
+  flow, the device is marked connected / disconnected by the session, and
+  real-device sessions are appended to `connection_history.json` (loaded
+  at startup), so `/api/history` is no longer always empty.
+- **Config files were silently overwritten with defaults.** Every section
+  and key is now optional, so partial files (including the README
+  example) parse; a file that fails to parse is never written back.
+- **Replay could never show a recording** (see *Changed*), and `stop()`
+  immediately followed by `start()` revived the previous writer task.
+- **AI vision failed on any real iPhone screenshot:** the base64 PNG was
+  passed as a `curl -d` argument and exceeded Windows' 32,767-character
+  command line.
+- WebDriverAgent HTTP 4xx/5xx no longer count as a completed tap (a 404
+  drops the cached session); translate and OpenAI transcription errors no
+  longer show up as translations / subtitles; the update check tells "no
+  release" apart from rate limiting.
+- `screenshot_clipboard` / `ocr_clipboard` report `no_frame` (`503`) like
+  the other analysis commands.
+- Clippy on Rust 1.98 (`chunks_exact_to_as_chunks`) no longer fails CI.
+- The two `wda_client` tests that set `IOS_REMOTE_WDA_URL` used separate
+  locks and could race under parallel `cargo test`.
 - **I1 — `SyntheticHandles` Drop.** Now actually aborts the renderer,
   subtitle, and WDA-stub tasks on drop (the doc comment was previously
   false; `JoinHandle` drop only detaches).
@@ -49,6 +142,17 @@ hardware.
   panics. Guarded by a `narrow_device_does_not_panic` test.
 - **I3 — WDA stub log injection.** Handlers log only parsed integer
   coordinates, never the raw request body.
+
+### Dependencies
+`cargo audit --deny warnings` is clean again (it had started reporting 4
+vulnerabilities and 3 warnings against an unchanged lockfile):
+- `crossbeam-epoch` 0.9.18 → 0.9.21 (RUSTSEC-2026-0204)
+- `plist` 1.9.0 → 1.10.1, pulling `quick-xml` 0.39.2 → 0.42.0
+  (RUSTSEC-2026-0194, RUSTSEC-2026-0195)
+- `rustls` 0.23.39 → 0.23.45 (RUSTSEC-2026-0285; `--features ios17` only)
+- `anyhow` 1.0.102 → 1.0.104 (RUSTSEC-2026-0190)
+- `rqrr` 0.10 → 0.11, pulling `lru` 0.16.4 → 0.18.4 (RUSTSEC-2026-0253)
+- `chacha20` 0.10.0 → 0.10.2 (yanked)
 
 ### Tests
 - New unit tests for layout hit-testing, state transitions, the macro
@@ -60,6 +164,11 @@ hardware.
   across ticks (I6), and a WDA port-collision regression. Subprocess
   stdio is captured to a temp log and dumped when `IOS_REMOTE_E2E_LOGS=1`
   (I5).
+- Dashboard token exposure (loopback vs foreign `Host`), curl config
+  escaping (no directive injection via secrets), REST status codes,
+  measured stats, partial / broken config files, replayable recordings,
+  QR decoding round-trip (`qrcode` dev-dependency), and the display RGBA
+  converter.
 
 ## [0.8.0] — 2026-05-13
 

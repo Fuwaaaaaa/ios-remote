@@ -363,6 +363,52 @@ mod tests {
         assert!(cfg.network.api_token.is_none());
     }
 
+    /// Every key under `table`, as dotted paths (`display.pip_mode`).
+    fn key_paths(table: &toml::Table, prefix: &str, out: &mut Vec<String>) {
+        for (key, value) in table {
+            let path = format!("{prefix}{key}");
+            match value {
+                toml::Value::Table(inner) => key_paths(inner, &format!("{path}."), out),
+                _ => out.push(path),
+            }
+        }
+    }
+
+    #[test]
+    fn readme_config_examples_parse_and_use_only_known_keys() {
+        // v0.8.0 shipped a README example that failed to parse and listed keys
+        // with no implementation. Unknown keys are silently ignored at load
+        // time, so check them explicitly: re-serializing the parsed config
+        // keeps only real fields.
+        for (name, readme) in [
+            ("README.md", include_str!("../README.md")),
+            ("README.ja.md", include_str!("../README.ja.md")),
+        ] {
+            let block = readme
+                // Leading newline: don't match the audio section's "### Configuration".
+                .split("\n## Configuration")
+                .nth(1)
+                .and_then(|section| section.split("```toml").nth(1))
+                .and_then(|block| block.split("```").next())
+                .unwrap_or_else(|| panic!("{name}: no ```toml block under ## Configuration"));
+            let cfg: AppConfig =
+                toml::from_str(block).unwrap_or_else(|e| panic!("{name}: example must parse: {e}"));
+            let example: toml::Table = toml::from_str(block).unwrap();
+            let known: toml::Table = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
+            let (mut example_keys, mut known_keys) = (Vec::new(), Vec::new());
+            key_paths(&example, "", &mut example_keys);
+            key_paths(&known, "", &mut known_keys);
+            let unknown: Vec<_> = example_keys
+                .iter()
+                .filter(|k| !known_keys.contains(k))
+                .collect();
+            assert!(
+                unknown.is_empty(),
+                "{name}: keys with no effect: {unknown:?}"
+            );
+        }
+    }
+
     #[test]
     fn readme_style_partial_config_loads() {
         // The README example lists only a few keys per section; that must

@@ -62,7 +62,7 @@ INFO  Web dashboard: http://127.0.0.1:8080
 ```
 
 - Defaults bind to `127.0.0.1`, so the dashboard is reachable only from the same PC.
-- `--lan` flips the bind to `0.0.0.0` so other LAN hosts can connect. The API token is mandatory.
+- `--lan` flips the bind to `0.0.0.0` so other LAN hosts can connect. The API token is mandatory: the dashboard embeds it only when opened from the same PC via `localhost` / `127.0.0.1`, so other hosts are asked to paste it (or open `http://<pc>:8080/#token=<token>`).
 - Override the token via the `IOS_REMOTE_API_TOKEN` env var, or pin it in `ios-remote.toml` under `[network] api_token`.
 
 ### Requirements
@@ -174,8 +174,8 @@ Flag interactions:
 |---|---|
 | `--synthetic --device <UDID>` | `--device` is ignored with a warning. |
 | `--synthetic --diag` | `--diag` runs as before; `--synthetic` is skipped. |
-| `--synthetic --record` | Recording starts at launch (H.264 only if ffmpeg is installed; controller lifecycle works regardless). |
-| `--synthetic --lan` | Web dashboard exposed on `0.0.0.0`; bearer token still required. |
+| `--synthetic --record` | Recording starts at launch. Requires ffmpeg on `PATH`; without it a warning is logged and nothing is recorded. |
+| `--synthetic --lan` | Web dashboard exposed on `0.0.0.0`; bearer token still required (other hosts paste it into the dashboard). |
 | `--synthetic-wda-port <PORT>` | Change the dummy WDA bind port from `8101`. |
 
 End-to-end smoke (no hardware): `cargo test --test synthetic_e2e --
@@ -267,7 +267,7 @@ stats, screenshot, recording, subtitles, and the WDA stub in ~3 s.
 | `No iPhone connected` | USB cable, port, the "Trust" tap on the iPhone. **No iPhone to test with?** Run `--synthetic` instead — see §[Synthetic Mode](#synthetic-mode-no-iphone-required) |
 | Screen freezes | Whether the USB-C cable supports data (charge-only cables won't work) |
 | Endless reconnect right after launch | Run `--list-devices` and pin the UDID with `--device <UDID>` |
-| `401 Unauthorized` in the dashboard | Use the API token from the startup log; open the dashboard from `/` (it embeds the token) instead of typing API URLs |
+| `401 Unauthorized` in the dashboard | Use the API token from the startup log (or `[network] api_token` in `ios-remote.toml`). On the same PC, open `http://127.0.0.1:8080/` and the token is embedded; from another host, paste it into the dashboard's token prompt |
 | `Failed to bind Web dashboard` | Pick a different port with `-w <PORT>` |
 | Multiple iPhones at once | One device at a time today; switch with `--device` |
 | `WDA not reachable` when running a macro | `--synthetic` ships a dummy WDA stub on `127.0.0.1:8101` for testing macros without WebDriverAgent; for real devices set up WDA per §[Macro setup](#macro-setup-sending-ios-input) |
@@ -293,7 +293,7 @@ Sessions saved under `recordings/` (a directory containing `session.json` / `boo
 
 ### Steps
 
-1. Record a session with `F2` or `POST /api/recording/start` → stopping creates `recordings/session_YYYYMMDD_HHMMSS/`.
+1. Record a session with `F2` or `POST /api/recording/start` → a `recordings/session_YYYYMMDD_HHMMSS_ffffff/` directory is created (the directory comes from `[recording] output_dir`). While recording, `POST /api/recording/bookmark` with `{ "label": "…" }` adds a seek bookmark.
 2. Open the dashboard and hit **Refresh** in the Replay card to populate the list.
 3. Pick a session and click **Load** — header info (resolution / frame count / length) and bookmarks appear.
 4. **Play** to start, **Pause** to stop.
@@ -301,17 +301,19 @@ Sessions saved under `recordings/` (a directory containing `session.json` / `boo
 
 ### ffmpeg dependency
 
-Decoding spawns an ffmpeg subprocess (`-f h264 -i pipe:0 -f rawvideo -pix_fmt rgba pipe:1`). If ffmpeg isn't installed, `POST /api/replay/play` returns `{ "status": "error", "error": "spawn ffmpeg: ..." }`. See Optional Dependencies below.
+Decoding spawns an ffmpeg subprocess (`-f h264 -i pipe:0 -f rawvideo -pix_fmt rgba pipe:1`). If ffmpeg isn't installed, `POST /api/replay/play` returns `409` with `{ "status": "error", "error": "spawn ffmpeg: ..." }`. See Optional Dependencies below.
 
 ### Known limitations
 
 - Seek positions are mapped proportionally (NAL-unit granularity, coarse timestamp accuracy)
 - Playback speed is fixed at 1.0×
-- With ffmpeg missing, recording / replay / RTMP all become no-ops (the encoder also uses ffmpeg)
+- With ffmpeg missing, recording is refused (`POST /api/recording/start` → `503`), replay can't play, and RTMP streaming doesn't start (the encoder also uses ffmpeg)
 
 ## Web Dashboard
 
-`http://localhost:8080` opens a real-time dashboard. The token is inlined into the dashboard HTML and attached automatically to fetch calls. Cards: Status / Actions / Replay / Log / Connection History.
+`http://localhost:8080` opens a real-time dashboard. Cards: Status / Actions / Replay / Log / Connection History.
+
+The page attaches the API token to its fetch calls automatically. It embeds the token only for requests from the same PC (loopback peer **and** a `localhost` / loopback-IP `Host` header). Opened from another host — e.g. with `--lan` — it shows a token prompt instead; the pasted token is kept in `sessionStorage` for that tab. A `#token=<token>` URL fragment works too and is never sent to the server.
 
 ### REST API
 
@@ -322,6 +324,7 @@ Decoding spawns an ffmpeg subprocess (`-f h264 -i pipe:0 -f rawvideo -pix_fmt rg
 | `/api/screenshot` | POST | Take a screenshot |
 | `/api/recording/start` | POST | Start recording |
 | `/api/recording/stop` | POST | Stop recording |
+| `/api/recording/bookmark` | POST | Add a seek bookmark to the active recording (`{ "label": "…" }`) |
 | `/api/ocr` | POST | Extract text |
 | `/api/ai/describe` | POST | AI screen understanding |
 | `/api/config` | GET/POST | Read / write config |
@@ -337,6 +340,9 @@ Decoding spawns an ffmpeg subprocess (`-f h264 -i pipe:0 -f rawvideo -pix_fmt rg
 | `/api/subtitles` | GET | Subtitle history (up to 50 entries) |
 | `/api/commands` | GET | All Command Palette commands |
 | `/api/command/{id}` | POST | Dispatch a Command Palette action |
+| `/api/synthetic/state` | GET | Synthetic device state (`--synthetic` only; `503` otherwise) |
+
+Every `/api/*` request needs `Authorization: Bearer <token>`. Errors come back with a matching HTTP status and a JSON body `{ "status": "error", "error": "<message>" }` — e.g. `503` when no frame has arrived yet or a dependency is missing (ffmpeg, `ANTHROPIC_API_KEY`, WebDriverAgent), `409` for a conflicting state (already recording, nothing to stop), `400` for invalid input.
 
 ### Command Palette dispatch
 
@@ -368,30 +374,34 @@ Title updates follow REST / Stream Deck-driven state changes, so you can read th
 
 ## Configuration
 
-Customize via `ios-remote.toml`:
+Customize via `ios-remote.toml`. Every section and key is optional — list only what you want to change; the rest keeps its default. Unknown keys (including ones removed in older releases, such as `[features]`) are ignored, and a file that fails to parse is left untouched. Restart after editing (`POST /api/config` also needs a restart to apply).
 
 ```toml
 [receiver]
-name = "ios-remote"
+name = "ios-remote"            # Window title (overridden by --name)
 
 [display]
-pip_mode = false
-show_stats = true
-show_touch_overlay = true
+pip_mode = false               # Always on top at startup (same as --pip)
+window_width = 960
+window_height = 540
+show_stats = false             # FPS / resolution overlay (toggle with F4)
+background_color = "#222222"   # Shown until the first frame arrives
 
 [recording]
-auto_record = false
-output_dir = "recordings"
+auto_record = false            # Same as --record (needs ffmpeg)
+output_dir = "recordings"      # Also where the Replay card looks
+max_duration_secs = 0          # 0 = unlimited
 
 [network]
-bind_address = "127.0.0.1"   # Set to "0.0.0.0" to expose on the LAN. --lan does the same.
-lan_access = false            # true forces bind_address to 0.0.0.0.
-api_token = ""                # Empty → auto-generated and written back on first launch.
+bind_address = "127.0.0.1"     # Set to "0.0.0.0" to expose on the LAN. --lan does the same.
+lan_access = false             # true forces bind_address to 0.0.0.0.
+api_token = ""                 # Empty → auto-generated and written back on first launch.
+rtmp_url = ""                  # e.g. "rtmp://live.twitch.tv/app/<key>" to stream via ffmpeg
 
-[features]
-notification_capture = true
-ocr = false
-ai_vision = false
+[audio]
+source = "loopback"            # "loopback" | "mic" | "off"
+chunk_secs = 5
+# language = "ja"              # Omit for Whisper auto-detect
 ```
 
 ## Architecture
@@ -449,7 +459,7 @@ ai_vision = false
 | Tool | Purpose | Install |
 |------|---------|---------|
 | tesseract-ocr | OCR text extraction | [tesseract](https://github.com/tesseract-ocr/tesseract) |
-| ffmpeg | RTMP streaming / recording transcode / Session Replay decode | [ffmpeg.org](https://ffmpeg.org) |
+| ffmpeg | Recording (required) / RTMP streaming / Session Replay decode | [ffmpeg.org](https://ffmpeg.org) |
 | `ANTHROPIC_API_KEY` | AI screen understanding | [anthropic.com](https://console.anthropic.com) |
 | `OPENAI_API_KEY` | Audio transcription (OpenAI Whisper API) | [openai.com](https://platform.openai.com) |
 | `IMGUR_CLIENT_ID` | Imgur instant share | [imgur.com/account/settings/apps](https://imgur.com/account/settings/apps) |
