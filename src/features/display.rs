@@ -214,11 +214,8 @@ fn compose_title(name: &str, pip: bool, recording: bool, replaying: bool) -> Str
 fn rgba_to_rgb32(rgba: &[u8], width: usize, height: usize) -> Vec<u32> {
     let pixel_count = width * height;
     let mut buf = Vec::with_capacity(pixel_count);
-    for chunk in rgba.chunks_exact(4).take(pixel_count) {
-        let r = chunk[0] as u32;
-        let g = chunk[1] as u32;
-        let b = chunk[2] as u32;
-        buf.push((r << 16) | (g << 8) | b);
+    for [r, g, b, _] in rgba.as_chunks::<4>().0.iter().take(pixel_count) {
+        buf.push((u32::from(*r) << 16) | (u32::from(*g) << 8) | u32::from(*b));
     }
     buf.resize(pixel_count, 0);
     buf
@@ -313,5 +310,22 @@ mod tests {
         let pip_pos = t.find("[PiP]").expect("missing pip");
         assert!(rec_pos < rep_pos);
         assert!(rep_pos < pip_pos);
+    }
+
+    #[test]
+    fn rgba_to_rgb32_packs_rgb_and_drops_alpha() {
+        let rgba = [0x11, 0x22, 0x33, 0xFF, 0xAA, 0xBB, 0xCC, 0x00];
+        assert_eq!(rgba_to_rgb32(&rgba, 2, 1), vec![0x0011_2233, 0x00AA_BBCC]);
+    }
+
+    #[test]
+    fn rgba_to_rgb32_pads_short_buffers_and_ignores_extra_bytes() {
+        // One whole pixel plus a stray byte for a 2x1 frame → second pixel black.
+        assert_eq!(rgba_to_rgb32(&[1, 2, 3, 4, 9], 2, 1), vec![0x0001_0203, 0]);
+        // More pixels than the frame holds → truncated to width * height.
+        assert_eq!(
+            rgba_to_rgb32(&[1, 2, 3, 4, 5, 6, 7, 8], 1, 1),
+            vec![0x0001_0203]
+        );
     }
 }
