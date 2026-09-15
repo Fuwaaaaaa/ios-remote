@@ -1,5 +1,4 @@
 use super::Frame;
-use std::io::Write;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
@@ -31,17 +30,32 @@ pub async fn obs_virtual_camera(mut rx: broadcast::Receiver<Arc<Frame>>) {
 /// RTMP streaming: pipe H.264 NALUs to ffmpeg for live streaming.
 ///
 /// Spawns ffmpeg as a child process and feeds it raw H.264 data.
-/// ffmpeg handles the RTMP protocol and muxing.
+/// ffmpeg handles the RTMP protocol and muxing. Enabled by setting
+/// `[network] rtmp_url` in `ios-remote.toml`.
 pub async fn rtmp_stream(mut rx: broadcast::Receiver<Arc<Frame>>, rtmp_url: String) {
-    info!(url = %rtmp_url, "Starting RTMP stream via ffmpeg");
+    use tokio::io::AsyncWriteExt;
 
-    let mut child = match std::process::Command::new("ffmpeg")
+    info!(url = %redact_url(&rtmp_url), "Starting RTMP stream via ffmpeg");
+
+    let mut child = match tokio::process::Command::new("ffmpeg")
         .args([
-            "-f", "h264", "-i", "pipe:0", "-c:v", "copy", "-f", "flv", &rtmp_url,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "h264",
+            "-i",
+            "pipe:0",
+            "-c:v",
+            "copy",
+            "-f",
+            "flv",
+            &rtmp_url,
         ])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
         .spawn()
     {
         Ok(c) => c,
@@ -67,20 +81,33 @@ pub async fn rtmp_stream(mut rx: broadcast::Receiver<Arc<Frame>>, rtmp_url: Stri
             Ok(frame) => {
                 if let Some(ref nalu) = frame.h264_nalu {
                     let start_code = [0x00u8, 0x00, 0x00, 0x01];
-                    if stdin.write_all(&start_code).is_err() {
+                    if stdin.write_all(&start_code).await.is_err() {
                         break;
                     }
-                    if stdin.write_all(nalu).is_err() {
+                    if stdin.write_all(nalu).await.is_err() {
                         break;
                     }
                     frame_count += 1;
                 }
             }
-            Err(broadcast::error::RecvError::Lagged(_)) => {}
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                warn!(dropped = n, "RTMP: falling behind — dropped frames");
+            }
             Err(broadcast::error::RecvError::Closed) => break,
         }
     }
 
-    info!(frames = frame_count, "RTMP stream ended");
-    let _ = child.kill();
+    warn!(
+        frames = frame_count,
+        "RTMP stream ended (ffmpeg exited or the connection dropped)"
+    );
+    let _ = child.kill().await;
+}
+
+/// Stream keys live in the RTMP URL path; keep them out of the logs.
+fn redact_url(url: &str) -> String {
+    match url.rsplit_once('/') {
+        Some((base, _key)) => format!("{base}/***"),
+        None => "***".to_string(),
+    }
 }

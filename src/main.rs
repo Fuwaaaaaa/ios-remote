@@ -30,9 +30,9 @@ use tracing_subscriber::EnvFilter;
     about = "iPhone screen mirroring via USB Type-C (Windows only)"
 )]
 struct Cli {
-    /// Display window name
-    #[arg(short, long, default_value = "ios-remote")]
-    name: String,
+    /// Display window name (default: `[receiver] name` from ios-remote.toml)
+    #[arg(short, long)]
+    name: Option<String>,
 
     /// Web dashboard port
     #[arg(short = 'w', long, default_value_t = 8080)]
@@ -182,9 +182,19 @@ async fn main() -> anyhow::Result<()> {
     //    RTMP with populated `Frame.h264_nalu`). No-op if ffmpeg is missing.
     features::h264_encoder::H264Encoder::new(frame_bus.clone()).spawn();
 
+    // ── RTMP live stream (`[network] rtmp_url`; needs ffmpeg + the encoder) ─
+    if !app_config.network.rtmp_url.trim().is_empty() {
+        tokio::spawn(features::streaming::rtmp_stream(
+            frame_bus.subscribe(),
+            app_config.network.rtmp_url.trim().to_string(),
+        ));
+    }
+
     // ── Recording controller (shared across CLI --record and the REST API) ──
-    let recorder = features::recording::RecordingController::new(frame_bus.clone());
-    if cli.record {
+    let recorder = features::recording::RecordingController::new(frame_bus.clone())
+        .with_output_dir(std::path::PathBuf::from(&app_config.recording.output_dir))
+        .with_max_duration_secs(app_config.recording.max_duration_secs);
+    if cli.record || app_config.recording.auto_record {
         match recorder.start() {
             Ok(path) => {
                 tracing::info!(file = %path.display(), "Recording enabled → {}", path.display())
@@ -197,9 +207,11 @@ async fn main() -> anyhow::Result<()> {
     let replay = features::session_replay::SessionPlaybackController::new(frame_bus.clone());
 
     // ── Display state (shared with dispatch handlers) ───────────────────────
-    let display_state = std::sync::Arc::new(std::sync::Mutex::new(
-        features::display_state::DisplayState::new(),
-    ));
+    let display_state = std::sync::Arc::new(std::sync::Mutex::new({
+        let mut state = features::display_state::DisplayState::new();
+        state.stats_visible = app_config.display.show_stats;
+        state
+    }));
 
     // ── Audio capture + transcription (gated) ───────────────────────────────
     // The transcriber is shared between the capture pump (writes subtitles)
@@ -236,6 +248,7 @@ async fn main() -> anyhow::Result<()> {
                     bus,
                     transcriber.clone(),
                     app_config.audio.chunk_secs,
+                    app_config.audio.language.clone(),
                 );
             }
             let transcriber_opt = if handle.is_some() {
@@ -270,17 +283,41 @@ async fn main() -> anyhow::Result<()> {
     let display_replay = replay.clone();
     let display_state_for_window = display_state.clone();
     let display_transcriber = transcriber.clone();
-    let pip = cli.pip;
+    let display_options = features::display::DisplayOptions {
+        name: cli
+            .name
+            .clone()
+            .unwrap_or_else(|| app_config.receiver.name.clone()),
+        pip: cli.pip || app_config.display.pip_mode,
+        width: app_config.display.window_width as usize,
+        height: app_config.display.window_height as usize,
+        background: app_config.display.background_rgb(),
+    };
     let display_handle = std::thread::spawn(move || {
         features::display::run_display(
             display_bus.subscribe(),
-            pip,
+            display_options,
             display_recorder,
             display_replay,
             display_state_for_window,
             display_transcriber,
         );
     });
+
+    // ── Synthetic interactive device state ──────────────────────────────────
+    // In synthetic mode this `Arc<Mutex<DeviceState>>` is shared three ways:
+    // the renderer reads it each frame, the WDA stub mutates it on tap/swipe,
+    // and the REST API exposes a read-only view at `GET /api/synthetic/state`.
+    // `None` in real-device mode (the endpoint then 404/503s).
+    let synthetic_info = synthetic::SyntheticDeviceInfo::default_iphone_15();
+    let synthetic_state = if cli.synthetic {
+        Some(synthetic::state::new_shared(
+            synthetic_info.width,
+            synthetic_info.height,
+        ))
+    } else {
+        None
+    };
 
     // ── Shared API state ────────────────────────────────────────────────────
     // Built up-front (before the web spawn) so the Stream Deck HID thread
@@ -292,17 +329,29 @@ async fn main() -> anyhow::Result<()> {
     } else {
         format!("http://{}", web_addr)
     };
+    // Connection history is persisted for real devices only; the synthetic
+    // device would otherwise pollute connection_history.json on every run.
+    let history = std::sync::Arc::new(tokio::sync::Mutex::new(if cli.synthetic {
+        config::ConnectionHistory::default()
+    } else {
+        config::ConnectionHistory::load()
+    }));
+    let stats = ui::stats::StatsHub::new((!cli.synthetic).then(|| history.clone()));
+    stats.spawn_frame_meter(&frame_bus);
+
     let api_state = std::sync::Arc::new(ui::api::ApiState {
         frame_bus: frame_bus.clone(),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(app_config.clone())),
-        history: std::sync::Arc::new(tokio::sync::Mutex::new(config::ConnectionHistory::default())),
-        stats: std::sync::Arc::new(tokio::sync::Mutex::new(ui::api::StreamStats::default())),
+        history,
+        stats: stats.clone(),
         api_token: api_token.clone(),
         recorder: recorder.clone(),
         replay: replay.clone(),
         dashboard_url,
         display: display_state.clone(),
         transcriber: transcriber.clone(),
+        synthetic_state: synthetic_state.clone(),
+        macro_runs: Default::default(),
     });
 
     // ── Web dashboard ───────────────────────────────────────────────────────
@@ -315,7 +364,10 @@ async fn main() -> anyhow::Result<()> {
         match tokio::net::TcpListener::bind(web_addr).await {
             Ok(listener) => {
                 tracing::info!(addr = %web_addr, "Web dashboard: http://{}", web_addr);
-                if let Err(e) = axum::serve(listener, app).await {
+                // Connect info lets the dashboard handler tell loopback
+                // requests (token inlined) from LAN ones (token withheld).
+                let service = app.into_make_service_with_connect_info::<SocketAddr>();
+                if let Err(e) = axum::serve(listener, service).await {
                     tracing::error!(error = %e, "Web server stopped with error");
                 }
             }
@@ -347,17 +399,19 @@ async fn main() -> anyhow::Result<()> {
             tracing::warn!("--device is ignored when --synthetic is set");
         }
 
-        let info = synthetic::SyntheticDeviceInfo::default_iphone_15();
+        let info = synthetic_info.clone();
+        // Shared interactive state (created above for the REST endpoint) +
+        // a shared monotonic clock so the renderer and the WDA stub agree on
+        // input timestamps (long-press flash decay).
+        let device = synthetic_state
+            .clone()
+            .unwrap_or_else(|| synthetic::state::new_shared(info.width, info.height));
+        let clock = std::sync::Arc::new(std::time::Instant::now());
 
-        // Pre-populate stats so /api/status reports "connected" and the
-        // dashboard's Status card shows the synthetic device identity.
-        {
-            let mut stats = api_state.stats.lock().await;
-            stats.connected = true;
-            stats.device_name = info.name.clone();
-            stats.resolution = format!("{}x{}", info.width, info.height);
-            stats.fps = 30.0;
-        }
+        // The synthetic device is "connected" for the whole run; FPS,
+        // resolution and frame count come from the frame meter like any
+        // real device.
+        stats.device_connected(&info.udid, &info.name).await;
 
         // Bind the dummy WDA listener up-front so a port-in-use shows up as a
         // hard error here (instead of leaving `IOS_REMOTE_WDA_URL` — which we
@@ -414,7 +468,14 @@ async fn main() -> anyhow::Result<()> {
             cli.web_port
         );
 
-        let _handles = synthetic::spawn(info, frame_publish, subtitle_push, wda_listener);
+        let _handles = synthetic::spawn(
+            info,
+            device,
+            clock,
+            frame_publish,
+            subtitle_push,
+            wda_listener,
+        );
 
         // Wait for the display window to close (Q/Esc/X). The synthetic
         // background tasks are aborted on handle drop right after.
@@ -429,7 +490,9 @@ async fn main() -> anyhow::Result<()> {
     let _iproxy = features::iproxy_supervisor::try_spawn(cli.device.as_deref());
 
     // ── USB connection (main task) ──────────────────────────────────────────
-    let receiver = usb::UsbReceiver::new(frame_bus).with_udid(cli.device.clone());
+    let receiver = usb::UsbReceiver::new(frame_bus)
+        .with_udid(cli.device.clone())
+        .with_stats(stats);
     receiver.run().await?;
 
     let _ = display_handle.join();

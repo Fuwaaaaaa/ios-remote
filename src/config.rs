@@ -6,90 +6,137 @@ use tracing::info;
 const CONFIG_FILE: &str = "ios-remote.toml";
 const HISTORY_FILE: &str = "connection_history.json";
 
-/// Persistent application configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Persistent application configuration (`ios-remote.toml`).
+///
+/// Every section and every key is optional: missing values fall back to
+/// their defaults, so a hand-written file with only the keys you care about
+/// loads fine. Unknown keys (including ones removed in earlier releases, such
+/// as `[features]` or `receiver.port`) are ignored.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct AppConfig {
     pub receiver: ReceiverSettings,
     pub display: DisplaySettings,
     pub recording: RecordingSettings,
     pub network: NetworkSettings,
-    pub features: FeatureToggles,
-    /// Audio capture / transcription settings. `serde(default)` so existing
-    /// `ios-remote.toml` files predating v0.7 still load.
-    #[serde(default)]
     pub audio: AudioSettings,
+    /// False when the on-disk file failed to parse. Such a config must never
+    /// be written back — that would silently replace the user's file with
+    /// defaults.
+    #[serde(skip)]
+    persist: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ReceiverSettings {
-    /// Display name for this receiver instance.
+    /// Name shown in the display window title. `--name` overrides it.
     pub name: String,
-    /// Legacy listen port (unused in USB mode; retained for config compatibility).
-    pub port: u16,
-    /// Maximum resolution to advertise (width).
-    pub max_width: u32,
-    /// Maximum resolution to advertise (height).
-    pub max_height: u32,
-    /// Maximum FPS to advertise.
-    pub max_fps: u32,
+}
+
+impl Default for ReceiverSettings {
+    fn default() -> Self {
+        Self {
+            name: "ios-remote".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DisplaySettings {
-    /// Start in picture-in-picture mode.
+    /// Start with the window always on top (same as `--pip`).
     pub pip_mode: bool,
-    /// Default window width.
+    /// Initial window width in pixels.
     pub window_width: u32,
-    /// Default window height.
+    /// Initial window height in pixels.
     pub window_height: u32,
-    /// Show FPS/latency overlay.
+    /// Show the FPS / resolution overlay at startup (toggle with F4).
     pub show_stats: bool,
-    /// Show touch overlay (ripple, trail).
-    pub show_touch_overlay: bool,
-    /// Dark background color (hex).
+    /// Background shown before the first frame arrives (`#RRGGBB`).
     pub background_color: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RecordingSettings {
-    /// Auto-start recording on connect.
-    pub auto_record: bool,
-    /// Output directory.
-    pub output_dir: String,
-    /// Maximum recording duration in seconds (0 = unlimited).
-    pub max_duration_secs: u64,
+impl Default for DisplaySettings {
+    fn default() -> Self {
+        Self {
+            pip_mode: false,
+            window_width: 960,
+            window_height: 540,
+            show_stats: false,
+            background_color: "#222222".to_string(),
+        }
+    }
+}
+
+impl DisplaySettings {
+    /// `background_color` as 0x00RRGGBB, falling back to dark grey.
+    pub fn background_rgb(&self) -> u32 {
+        let hex = self.background_color.trim().trim_start_matches('#');
+        if hex.len() == 6 {
+            u32::from_str_radix(hex, 16).unwrap_or(0x0022_2222)
+        } else {
+            0x0022_2222
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RecordingSettings {
+    /// Start recording as soon as the app starts (same as `--record`).
+    pub auto_record: bool,
+    /// Directory for session recordings; also where Replay looks for them.
+    pub output_dir: String,
+    /// Stop a recording automatically after this many seconds (0 = unlimited).
+    pub max_duration_secs: u64,
+}
+
+impl Default for RecordingSettings {
+    fn default() -> Self {
+        Self {
+            auto_record: false,
+            output_dir: "recordings".to_string(),
+            max_duration_secs: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct NetworkSettings {
-    /// Bind address for HTTP servers (Web Dashboard, MJPEG). Default 127.0.0.1.
+    /// Bind address for the Web Dashboard / API. Default 127.0.0.1.
     /// Use `lan_access = true` (or CLI `--lan`) to switch to 0.0.0.0.
     pub bind_address: String,
-    /// When true, forces bind_address to 0.0.0.0 and requires an API token.
+    /// When true, forces bind_address to 0.0.0.0.
     pub lan_access: bool,
     /// Bearer token required on every /api/* request. Auto-generated on first
     /// launch if None. Overridden by env var `IOS_REMOTE_API_TOKEN`.
     pub api_token: Option<String>,
-    /// RTMP streaming URL (empty = disabled).
+    /// RTMP URL to live-stream the H.264 feed to via ffmpeg (empty = off).
     pub rtmp_url: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FeatureToggles {
-    pub obs_virtual_camera: bool,
-    pub notification_capture: bool,
-    pub ocr: bool,
-    pub ai_vision: bool,
-    pub macros: bool,
+impl Default for NetworkSettings {
+    fn default() -> Self {
+        Self {
+            bind_address: "127.0.0.1".to_string(),
+            lan_access: false,
+            api_token: None,
+            rtmp_url: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AudioSettings {
     /// One of `loopback`, `mic`, `off`. Defaults to `loopback` (WASAPI).
     pub source: String,
     /// Window size fed to Whisper per chunk, in seconds.
     pub chunk_secs: u32,
-    /// Optional language hint passed to Whisper. `None` = auto-detect.
+    /// Optional language hint (e.g. "ja") passed to Whisper / the OpenAI
+    /// API. `None` = auto-detect.
     pub language: Option<String>,
 }
 
@@ -103,63 +150,30 @@ impl Default for AudioSettings {
     }
 }
 
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            receiver: ReceiverSettings {
-                name: "ios-remote".to_string(),
-                port: 7000,
-                max_width: 1920,
-                max_height: 1080,
-                max_fps: 60,
-            },
-            display: DisplaySettings {
-                pip_mode: false,
-                window_width: 960,
-                window_height: 540,
-                show_stats: true,
-                show_touch_overlay: true,
-                background_color: "#222222".to_string(),
-            },
-            recording: RecordingSettings {
-                auto_record: false,
-                output_dir: "recordings".to_string(),
-                max_duration_secs: 0,
-            },
-            network: NetworkSettings {
-                bind_address: "127.0.0.1".to_string(),
-                lan_access: false,
-                api_token: None,
-                rtmp_url: String::new(),
-            },
-            features: FeatureToggles {
-                obs_virtual_camera: false,
-                notification_capture: true,
-                ocr: false,
-                ai_vision: false,
-                macros: false,
-            },
-            audio: AudioSettings::default(),
-        }
-    }
-}
-
 impl AppConfig {
     /// Load config from file, or create default if missing.
+    ///
+    /// A file that fails to parse is reported and left untouched: the
+    /// defaults are used for this run but never saved over it.
     pub fn load() -> Self {
         match fs::read_to_string(CONFIG_FILE) {
-            Ok(content) => match toml::from_str(&content) {
-                Ok(config) => {
+            Ok(content) => match toml::from_str::<Self>(&content) {
+                Ok(mut config) => {
                     info!(file = CONFIG_FILE, "Configuration loaded");
+                    config.persist = true;
                     config
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, "Config parse error — using defaults");
+                    tracing::warn!(
+                        error = %e,
+                        file = CONFIG_FILE,
+                        "Config parse error — using defaults for this run; the file is left unchanged"
+                    );
                     Self::default()
                 }
             },
             Err(_) => {
-                let config = Self::default();
+                let config = Self::default().into_persistent();
                 config.save();
                 info!(file = CONFIG_FILE, "Default configuration created");
                 config
@@ -167,11 +181,25 @@ impl AppConfig {
         }
     }
 
-    /// Save config to file.
+    /// Save config to file. No-op for a config whose file failed to parse.
     pub fn save(&self) {
+        if !self.persist {
+            tracing::warn!(
+                file = CONFIG_FILE,
+                "Not saving configuration: the existing file could not be parsed"
+            );
+            return;
+        }
         if let Ok(content) = toml::to_string_pretty(self) {
             let _ = fs::write(CONFIG_FILE, content);
         }
+    }
+
+    /// Mark a config (e.g. one received via `POST /api/config`) as safe to
+    /// write to disk.
+    pub fn into_persistent(mut self) -> Self {
+        self.persist = true;
+        self
     }
 
     /// Ensure an API token exists. Preference order:
@@ -233,19 +261,38 @@ pub struct ConnectionRecord {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConnectionHistory {
     pub records: Vec<ConnectionRecord>,
+    /// Backing file. `None` (the `Default`) keeps the history in memory only,
+    /// which is what tests and synthetic mode want.
+    #[serde(skip)]
+    path: Option<std::path::PathBuf>,
 }
 
 impl ConnectionHistory {
+    /// Load `connection_history.json` from the working directory; later
+    /// updates are written back to it.
     pub fn load() -> Self {
-        match fs::read_to_string(HISTORY_FILE) {
+        let mut history: Self = match fs::read_to_string(HISTORY_FILE) {
             Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
             Err(_) => Self::default(),
-        }
+        };
+        history.path = Some(std::path::PathBuf::from(HISTORY_FILE));
+        history
     }
 
     pub fn save(&self) {
+        let Some(path) = &self.path else {
+            return;
+        };
         if let Ok(json) = serde_json::to_string_pretty(self) {
-            let _ = fs::write(HISTORY_FILE, json);
+            let _ = fs::write(path, json);
+        }
+    }
+
+    /// Add connected time to an existing record (called when a session ends).
+    pub fn add_duration(&mut self, device_id: &str, duration_secs: u64) {
+        if let Some(record) = self.records.iter_mut().find(|r| r.device_id == device_id) {
+            record.total_duration_secs += duration_secs;
+            self.save();
         }
     }
 
@@ -317,9 +364,76 @@ mod tests {
     }
 
     #[test]
+    fn readme_style_partial_config_loads() {
+        // The README example lists only a few keys per section; that must
+        // parse instead of falling back to defaults.
+        let toml = r#"
+            [receiver]
+            name = "desk-mirror"
+
+            [display]
+            pip_mode = true
+
+            [recording]
+            output_dir = "captures"
+
+            [network]
+            api_token = "abc"
+        "#;
+        let cfg: AppConfig = toml::from_str(toml).expect("partial config must parse");
+        assert_eq!(cfg.receiver.name, "desk-mirror");
+        assert!(cfg.display.pip_mode);
+        assert_eq!(cfg.display.window_width, 960, "missing keys use defaults");
+        assert_eq!(cfg.recording.output_dir, "captures");
+        assert_eq!(cfg.network.api_token.as_deref(), Some("abc"));
+        assert_eq!(cfg.network.bind_address, "127.0.0.1");
+    }
+
+    #[test]
+    fn legacy_keys_from_older_releases_are_ignored() {
+        let toml = r#"
+            [receiver]
+            name = "old"
+            port = 7000
+            max_fps = 60
+
+            [features]
+            ocr = true
+        "#;
+        let cfg: AppConfig = toml::from_str(toml).expect("legacy config must parse");
+        assert_eq!(cfg.receiver.name, "old");
+    }
+
+    #[test]
+    fn unparseable_config_is_never_overwritten() {
+        with_tempdir(|| {
+            // SAFETY: process-global env mutation; serialized by CWD_GUARD.
+            unsafe { std::env::remove_var("IOS_REMOTE_API_TOKEN") };
+            let broken = "[network\napi_token = \"keep-me\"\n";
+            std::fs::write(CONFIG_FILE, broken).unwrap();
+
+            let mut cfg = AppConfig::load();
+            // Token generation normally persists — it must not here.
+            let token = cfg.resolve_api_token();
+            assert!(!token.is_empty());
+            assert_eq!(std::fs::read_to_string(CONFIG_FILE).unwrap(), broken);
+        });
+    }
+
+    #[test]
+    fn background_color_parses_hex() {
+        let mut d = DisplaySettings::default();
+        assert_eq!(d.background_rgb(), 0x222222);
+        d.background_color = "#00d4ff".into();
+        assert_eq!(d.background_rgb(), 0x00d4ff);
+        d.background_color = "not-a-color".into();
+        assert_eq!(d.background_rgb(), 0x222222);
+    }
+
+    #[test]
     fn save_and_load_round_trip_preserves_fields() {
         with_tempdir(|| {
-            let mut original = AppConfig::default();
+            let mut original = AppConfig::default().into_persistent();
             original.network.api_token = Some("test-token-123".into());
             original.network.lan_access = true;
             original.save();

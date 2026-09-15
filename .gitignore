@@ -6,6 +6,8 @@
 # Runtime artifacts (synthetic mode + real-device recording/screenshot output)
 /recordings/
 /screenshots/
+/gifs/
+/connection_history.json
 
 # Local per-machine config (committed example lives in docs)
 /ios-remote.toml

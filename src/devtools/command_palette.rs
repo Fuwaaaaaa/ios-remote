@@ -317,6 +317,10 @@ pub fn execute(action_id: &str, state: &ApiState) -> Result<CommandResult, Comma
             Ok(CommandResult::ok("screenshot", format!("saved → {path}")))
         }
         "screenshot_clipboard" => {
+            state
+                .frame_bus
+                .latest_frame()
+                .ok_or(CommandError::NoFrame)?;
             crate::features::clipboard_sync::copy_screenshot_to_clipboard(&state.frame_bus)
                 .map_err(|m| CommandError::Failed {
                     action: "screenshot_clipboard".into(),
@@ -328,9 +332,9 @@ pub fn execute(action_id: &str, state: &ApiState) -> Result<CommandResult, Comma
             ))
         }
         "record_start" => {
-            let path = state.recorder.start().map_err(|m| CommandError::Failed {
+            let path = state.recorder.start().map_err(|e| CommandError::Failed {
                 action: "record_start".into(),
-                message: m,
+                message: e.to_string(),
             })?;
             Ok(CommandResult::ok(
                 "record_start",
@@ -363,6 +367,10 @@ pub fn execute(action_id: &str, state: &ApiState) -> Result<CommandResult, Comma
             Ok(CommandResult::ok("ocr", text))
         }
         "ocr_clipboard" => {
+            state
+                .frame_bus
+                .latest_frame()
+                .ok_or(CommandError::NoFrame)?;
             let text =
                 crate::features::clipboard_sync::copy_screen_text_to_clipboard(&state.frame_bus)
                     .map_err(|m| CommandError::Failed {
@@ -619,9 +627,7 @@ mod tests {
             history: std::sync::Arc::new(tokio::sync::Mutex::new(
                 crate::config::ConnectionHistory::default(),
             )),
-            stats: std::sync::Arc::new(tokio::sync::Mutex::new(
-                crate::ui::api::StreamStats::default(),
-            )),
+            stats: crate::ui::stats::StatsHub::new(None),
             api_token: String::new(),
             recorder: crate::features::recording::RecordingController::new(bus.clone()),
             replay: crate::features::session_replay::SessionPlaybackController::new(bus),
@@ -630,6 +636,8 @@ mod tests {
                 crate::features::display_state::DisplayState::new(),
             )),
             transcriber: None,
+            synthetic_state: None,
+            macro_runs: Default::default(),
         }
     }
 

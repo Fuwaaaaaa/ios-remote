@@ -26,6 +26,7 @@ pub async fn capture_loop(
     device_id: u32,
     frame_bus: FrameBus,
     last_device: Arc<Mutex<Option<DeviceInfo>>>,
+    stats: Option<&crate::ui::stats::StatsHub>,
 ) -> anyhow::Result<()> {
     // Start screenshotr service via lockdownd
     let mut lockdown = super::lockdown::LockdownClient::connect(mux, device_id).await?;
@@ -116,6 +117,13 @@ pub async fn capture_loop(
                             timestamp_us: start.elapsed().as_micros() as u64,
                             h264_nalu: None,
                         });
+                        // "Connected" means frames flow, not merely that
+                        // lockdownd answered — so the first frame marks it.
+                        if frame_count == 1
+                            && let Some(stats) = stats
+                        {
+                            stats.device_connected(&dev_info.udid, &dev_info.name).await;
+                        }
 
                         if frame_count % 30 == 1 {
                             let fps = frame_count as f64 / start.elapsed().as_secs_f64();

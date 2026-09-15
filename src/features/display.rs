@@ -9,6 +9,31 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use tracing::info;
 
+/// Window settings resolved from CLI flags + `[display]` config.
+#[derive(Debug, Clone)]
+pub struct DisplayOptions {
+    /// Title prefix (`--name` / `[receiver] name`).
+    pub name: String,
+    /// Start always-on-top.
+    pub pip: bool,
+    pub width: usize,
+    pub height: usize,
+    /// 0x00RRGGBB shown until the first frame arrives.
+    pub background: u32,
+}
+
+impl Default for DisplayOptions {
+    fn default() -> Self {
+        Self {
+            name: "ios-remote".to_string(),
+            pip: false,
+            width: 960,
+            height: 540,
+            background: 0x0022_2222,
+        }
+    }
+}
+
 /// Run the display window on a dedicated OS thread.
 ///
 /// Features:
@@ -17,17 +42,19 @@ use tracing::info;
 ///   - Activity indicator: title bar prefix shows ● REC / ▶ REPLAY when
 ///     either lifecycle is active so users have visible feedback for
 ///     state mutated via REST or Stream Deck
-///   - Hotkeys: S = screenshot, F = fullscreen toggle, Q/Esc = quit
+///   - Hotkeys: S = screenshot, Q/Esc = quit
 pub fn run_display(
     mut frame_rx: broadcast::Receiver<Arc<Frame>>,
-    pip_mode: bool,
+    options: DisplayOptions,
     recorder: RecordingController,
     replay: SessionPlaybackController,
     display_state: Arc<Mutex<DisplayState>>,
     transcriber: Option<Arc<Mutex<Transcriber>>>,
 ) {
-    let init_w = 960;
-    let init_h = 540;
+    let init_w = options.width.max(160);
+    let init_h = options.height.max(120);
+    let pip_mode = options.pip;
+    let name = options.name.as_str();
 
     let opts = WindowOptions {
         resize: true,
@@ -36,7 +63,7 @@ pub fn run_display(
         ..WindowOptions::default()
     };
 
-    let mut last_title = compose_title(pip_mode, false, false);
+    let mut last_title = compose_title(name, pip_mode, false, false);
     let mut window = match Window::new(&last_title, init_w, init_h, opts) {
         Ok(w) => w,
         Err(e) => {
@@ -48,7 +75,7 @@ pub fn run_display(
     window.set_target_fps(60);
     info!(pip = pip_mode, "Display window opened");
 
-    let mut buffer: Vec<u32> = vec![0x00222222; init_w * init_h]; // dark gray bg
+    let mut buffer: Vec<u32> = vec![options.background & 0x00FF_FFFF; init_w * init_h];
     let mut width = init_w;
     let mut height = init_h;
     let mut latest_frame: Option<Arc<Frame>> = None;
@@ -108,7 +135,7 @@ pub fn run_display(
 
         // Activity indicator: refresh the title only when the state flips so
         // we're not allocating + Win32-call'ing every frame.
-        let next_title = compose_title(pip_mode, recorder.is_active(), replay.is_active());
+        let next_title = compose_title(name, pip_mode, recorder.is_active(), replay.is_active());
         if next_title != last_title {
             window.set_title(&next_title);
             last_title = next_title;
@@ -165,7 +192,7 @@ fn resolve_pending_click(display_state: &Arc<Mutex<DisplayState>>, frame: &Frame
     }
 }
 
-fn compose_title(pip: bool, recording: bool, replaying: bool) -> String {
+fn compose_title(name: &str, pip: bool, recording: bool, replaying: bool) -> String {
     let mut parts: Vec<&str> = Vec::with_capacity(3);
     if recording {
         parts.push("● REC");
@@ -177,9 +204,9 @@ fn compose_title(pip: bool, recording: bool, replaying: bool) -> String {
         parts.push("[PiP]");
     }
     if parts.is_empty() {
-        "ios-remote — USB Mirror".to_string()
+        format!("{name} — USB Mirror")
     } else {
-        format!("ios-remote — {}", parts.join(" · "))
+        format!("{name} — {}", parts.join(" · "))
     }
 }
 
@@ -187,11 +214,8 @@ fn compose_title(pip: bool, recording: bool, replaying: bool) -> String {
 fn rgba_to_rgb32(rgba: &[u8], width: usize, height: usize) -> Vec<u32> {
     let pixel_count = width * height;
     let mut buf = Vec::with_capacity(pixel_count);
-    for chunk in rgba.chunks_exact(4).take(pixel_count) {
-        let r = chunk[0] as u32;
-        let g = chunk[1] as u32;
-        let b = chunk[2] as u32;
-        buf.push((r << 16) | (g << 8) | b);
+    for [r, g, b, _] in rgba.as_chunks::<4>().0.iter().take(pixel_count) {
+        buf.push((u32::from(*r) << 16) | (u32::from(*g) << 8) | u32::from(*b));
     }
     buf.resize(pixel_count, 0);
     buf
@@ -244,36 +268,64 @@ mod tests {
     #[test]
     fn idle_title_has_no_indicator() {
         assert_eq!(
-            compose_title(false, false, false),
+            compose_title("ios-remote", false, false, false),
             "ios-remote — USB Mirror"
         );
     }
 
     #[test]
+    fn title_uses_configured_name() {
+        assert_eq!(
+            compose_title("desk-mirror", false, false, false),
+            "desk-mirror — USB Mirror"
+        );
+    }
+
+    #[test]
     fn pip_only_shows_marker() {
-        assert_eq!(compose_title(true, false, false), "ios-remote — [PiP]");
+        assert_eq!(
+            compose_title("ios-remote", true, false, false),
+            "ios-remote — [PiP]"
+        );
     }
 
     #[test]
     fn recording_indicator_overrides_idle_title() {
-        let t = compose_title(false, true, false);
+        let t = compose_title("ios-remote", false, true, false);
         assert!(t.contains("● REC"), "got: {t}");
     }
 
     #[test]
     fn replay_indicator_overrides_idle_title() {
-        let t = compose_title(false, false, true);
+        let t = compose_title("ios-remote", false, false, true);
         assert!(t.contains("▶ REPLAY"), "got: {t}");
     }
 
     #[test]
     fn all_three_states_concatenate_in_order() {
-        let t = compose_title(true, true, true);
+        let t = compose_title("ios-remote", true, true, true);
         // recording first, then replay, then PiP.
         let rec_pos = t.find("● REC").expect("missing rec");
         let rep_pos = t.find("▶ REPLAY").expect("missing replay");
         let pip_pos = t.find("[PiP]").expect("missing pip");
         assert!(rec_pos < rep_pos);
         assert!(rep_pos < pip_pos);
+    }
+
+    #[test]
+    fn rgba_to_rgb32_packs_rgb_and_drops_alpha() {
+        let rgba = [0x11, 0x22, 0x33, 0xFF, 0xAA, 0xBB, 0xCC, 0x00];
+        assert_eq!(rgba_to_rgb32(&rgba, 2, 1), vec![0x0011_2233, 0x00AA_BBCC]);
+    }
+
+    #[test]
+    fn rgba_to_rgb32_pads_short_buffers_and_ignores_extra_bytes() {
+        // One whole pixel plus a stray byte for a 2x1 frame → second pixel black.
+        assert_eq!(rgba_to_rgb32(&[1, 2, 3, 4, 9], 2, 1), vec![0x0001_0203, 0]);
+        // More pixels than the frame holds → truncated to width * height.
+        assert_eq!(
+            rgba_to_rgb32(&[1, 2, 3, 4, 5, 6, 7, 8], 1, 1),
+            vec![0x0001_0203]
+        );
     }
 }

@@ -20,6 +20,7 @@ pub mod gestures;
 pub mod gif_capture;
 pub mod h264_encoder;
 pub mod heatmap;
+pub mod http;
 pub mod i18n;
 pub mod imgur_share;
 pub mod iproxy_supervisor;
@@ -75,6 +76,7 @@ pub mod presentation;
 #[cfg(feature = "experimental")]
 pub mod video_filter;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
@@ -91,6 +93,11 @@ pub struct Frame {
 pub struct FrameBus {
     sender: broadcast::Sender<Arc<Frame>>,
     latest: Arc<Mutex<Option<Arc<Frame>>>>,
+    /// Set while a session replay is playing. Live sources keep calling
+    /// `publish`, but their frames are dropped so the display, recorder and
+    /// encoder see only the replay instead of two alternating streams (which
+    /// flickered and made the encoder respawn ffmpeg on every resolution flip).
+    live_suspended: Arc<AtomicBool>,
 }
 
 impl FrameBus {
@@ -99,11 +106,45 @@ impl FrameBus {
         Self {
             sender,
             latest: Arc::new(Mutex::new(None)),
+            live_suspended: Arc::new(AtomicBool::new(false)),
         }
     }
+
+    /// Publish a frame from a live source (USB capture, synthetic renderer).
+    /// Dropped while live capture is suspended for a replay.
     pub fn publish(&self, frame: Frame) {
+        if self.live_suspended.load(Ordering::SeqCst) {
+            return;
+        }
+        self.broadcast(frame);
+    }
+
+    /// Publish a decoded replay frame (always delivered).
+    pub fn publish_replay(&self, frame: Frame) {
+        self.broadcast(frame);
+    }
+
+    /// Publish a frame derived from another frame, e.g. encoder NAL output
+    /// (always delivered).
+    pub fn publish_derived(&self, frame: Frame) {
+        self.broadcast(frame);
+    }
+
+    pub fn set_live_suspended(&self, suspended: bool) {
+        self.live_suspended.store(suspended, Ordering::SeqCst);
+    }
+
+    pub fn live_suspended(&self) -> bool {
+        self.live_suspended.load(Ordering::SeqCst)
+    }
+
+    fn broadcast(&self, frame: Frame) {
         let frame = Arc::new(frame);
-        {
+        // Only image-bearing frames become "latest". The H.264 encoder
+        // republishes NAL-only frames (empty `rgba`) several times per source
+        // frame; letting those win would make every screenshot / OCR / AI /
+        // QR call fail whenever ffmpeg is installed.
+        if !frame.rgba.is_empty() {
             // Poisoned locks recover by ignoring the poison — our state is a simple
             // Arc swap and the previous holder panicking cannot leave it inconsistent.
             let mut l = self.latest.lock().unwrap_or_else(|e| e.into_inner());
@@ -114,10 +155,61 @@ impl FrameBus {
     pub fn subscribe(&self) -> broadcast::Receiver<Arc<Frame>> {
         self.sender.subscribe()
     }
+    /// Most recent frame that carries decoded RGBA pixels.
     pub fn latest_frame(&self) -> Option<Arc<Frame>> {
         self.latest
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Frame, FrameBus};
+
+    fn frame(rgba: Vec<u8>, nalu: Option<Vec<u8>>) -> Frame {
+        Frame {
+            width: 1,
+            height: 1,
+            rgba,
+            timestamp_us: 0,
+            h264_nalu: nalu,
+        }
+    }
+
+    #[test]
+    fn nal_only_frames_do_not_replace_latest_image() {
+        let bus = FrameBus::new();
+        bus.publish(frame(vec![1, 2, 3, 255], None));
+        bus.publish(frame(Vec::new(), Some(vec![0x65, 0x01])));
+        let latest = bus.latest_frame().expect("image frame kept");
+        assert_eq!(latest.rgba, vec![1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn live_frames_are_dropped_while_replay_runs() {
+        let bus = FrameBus::new();
+        let mut rx = bus.subscribe();
+        bus.set_live_suspended(true);
+        bus.publish(frame(vec![1, 1, 1, 255], None)); // live → dropped
+        bus.publish_replay(frame(vec![2, 2, 2, 255], None));
+        bus.publish_derived(frame(Vec::new(), Some(vec![0x65])));
+        assert_eq!(rx.try_recv().unwrap().rgba, vec![2, 2, 2, 255]);
+        assert!(rx.try_recv().unwrap().h264_nalu.is_some());
+        assert!(rx.try_recv().is_err(), "live frame must not be delivered");
+        bus.set_live_suspended(false);
+        bus.publish(frame(vec![3, 3, 3, 255], None));
+        assert_eq!(rx.try_recv().unwrap().rgba, vec![3, 3, 3, 255]);
+    }
+
+    #[test]
+    fn nal_only_frames_still_reach_subscribers() {
+        let bus = FrameBus::new();
+        let mut rx = bus.subscribe();
+        bus.publish(frame(Vec::new(), Some(vec![0x65])));
+        let got = rx.try_recv().expect("recorder must still see NAL frames");
+        assert!(got.h264_nalu.is_some());
+        assert!(bus.latest_frame().is_none());
     }
 }

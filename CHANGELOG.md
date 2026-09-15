@@ -6,6 +6,61 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Interactive Synthetic Mode — `--synthetic` graduates from a passive demo
+animation into a usable, finished-product emulator. Input now drives the
+screen, so the entire app can be operated and demonstrated without any
+hardware.
+
+### Added
+- **Interactive synthetic device.** A shared `DeviceState`
+  (`src/synthetic/state.rs`) is mutated by the WDA stub on every
+  tap/swipe/long-press and read by the renderer each frame. Tapping a
+  home-screen icon opens that app; tapping the back chevron or home
+  indicator returns to the grid; horizontal swipes flip between home
+  pages; vertical swipes scroll an open app; a long press flashes a
+  highlight. The renderer (`src/synthetic/renderer.rs`) draws the *current*
+  screen, so screenshots / OCR / AI / recording capture real interaction.
+  Geometry + hit-testing share one source of truth
+  (`src/synthetic/layout.rs`) so drawn icons and tap targets can't drift.
+- **`GET /api/synthetic/state`.** Read-only JSON view of the synthetic
+  device (`screen`, `app` letter/index, `page`, `app_scroll`,
+  `interactions`). Registered only in `--synthetic` mode (503 otherwise).
+- **Macro engine completed.** `Repeat { count, actions_back }` re-runs the
+  preceding actions (guarded by count clamp, nesting-depth limit, and a
+  total-action budget); `WaitForScreen { template_path, timeout_ms, region }`
+  polls the live frame via the shared `template_match` NCC matcher until
+  the template appears or the timeout elapses. Both were previously
+  `warn!`-and-skip stubs. Macros now genuinely work in synthetic mode.
+
+### Changed
+- **Synthetic macros run on a dedicated runtime.** `/api/macros/run` now
+  executes each macro on its own OS thread + current-thread runtime. The
+  `WdaClient` issues a *blocking* `curl`; in synthetic mode the WDA stub
+  shares the main runtime, so running there could starve the very stub the
+  macro calls (loopback request → no response → timeout). Isolation keeps
+  the blocking I/O off the main workers.
+
+### Fixed
+- **I1 — `SyntheticHandles` Drop.** Now actually aborts the renderer,
+  subtitle, and WDA-stub tasks on drop (the doc comment was previously
+  false; `JoinHandle` drop only detaches).
+- **I2 — renderer underflow.** Status-bar battery and grid layout use
+  `saturating_sub`, so a degenerate device narrower than the grid no longer
+  panics. Guarded by a `narrow_device_does_not_panic` test.
+- **I3 — WDA stub log injection.** Handlers log only parsed integer
+  coordinates, never the raw request body.
+
+### Tests
+- New unit tests for layout hit-testing, state transitions, the macro
+  engine (`Repeat`/`WaitForScreen` happy/timeout/guard paths), and renderer
+  home-vs-app divergence.
+- E2E (`tests/synthetic_e2e.rs`): interactivity (tap-opens-app, home
+  returns, swipe pages), macro-driven interaction, drag/long-press via
+  session (I6), `--synthetic --diag` fast-exit (I6), subtitle rotation
+  across ticks (I6), and a WDA port-collision regression. Subprocess
+  stdio is captured to a temp log and dumped when `IOS_REMOTE_E2E_LOGS=1`
+  (I5).
+
 ## [0.8.0] — 2026-05-13
 
 Synthetic Device Mode — *no-iPhone-required* milestone. Lands a single

@@ -1,5 +1,4 @@
 use super::{Frame, FrameBus};
-use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,27 +8,21 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{info, warn};
 
-/// Session replay: record full sessions and replay them later.
+/// Session replay: play back sessions written by
+/// [`super::recording::RecordingController`].
 ///
-/// Records all frames + timestamps + events to a session file.
-/// Can replay at original speed or fast-forward.
+/// A session directory holds `session.json` ([`SessionHeader`]),
+/// `bookmarks.json` (`Vec<Bookmark>`) and `video.h264` (Annex-B NAL units).
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SessionHeader {
     pub start_time: String,
     pub width: u32,
     pub height: u32,
+    /// Number of NAL units in `video.h264` — the playback writer feeds one
+    /// NAL per `duration_secs / total_frames` interval.
     pub total_frames: u64,
     pub duration_secs: f64,
-}
-
-pub struct SessionRecorder {
-    frames: Vec<(u64, Vec<u8>)>, // (timestamp_us, h264_nalu)
-    bookmarks: Vec<Bookmark>,
-    recording: bool,
-    start_time: std::time::Instant,
-    width: u32,
-    height: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -37,88 +30,6 @@ pub struct Bookmark {
     pub timestamp_us: u64,
     pub label: String,
     pub frame_index: u64,
-}
-
-impl SessionRecorder {
-    pub fn new() -> Self {
-        Self {
-            frames: Vec::new(),
-            bookmarks: Vec::new(),
-            recording: false,
-            start_time: std::time::Instant::now(),
-            width: 0,
-            height: 0,
-        }
-    }
-
-    pub fn start(&mut self) {
-        self.frames.clear();
-        self.bookmarks.clear();
-        self.recording = true;
-        self.start_time = std::time::Instant::now();
-        info!("Session recording started");
-    }
-
-    pub fn stop(&mut self) {
-        self.recording = false;
-        info!("Session recording stopped");
-    }
-
-    pub fn push_frame(&mut self, frame: &Frame) {
-        if !self.recording {
-            return;
-        }
-        self.width = frame.width;
-        self.height = frame.height;
-        if let Some(ref nalu) = frame.h264_nalu {
-            self.frames.push((frame.timestamp_us, nalu.clone()));
-        }
-    }
-
-    pub fn add_bookmark(&mut self, label: &str) {
-        let ts = self.start_time.elapsed().as_micros() as u64;
-        self.bookmarks.push(Bookmark {
-            timestamp_us: ts,
-            label: label.to_string(),
-            frame_index: self.frames.len() as u64,
-        });
-        info!(label, "Bookmark added");
-    }
-
-    pub fn bookmarks(&self) -> &[Bookmark] {
-        &self.bookmarks
-    }
-
-    /// Save session to directory.
-    pub fn save(&self, dir: &str) -> Result<String, String> {
-        let path = format!("{}/session_{}", dir, Local::now().format("%Y%m%d_%H%M%S"));
-        fs::create_dir_all(&path).map_err(|e| e.to_string())?;
-
-        let header = SessionHeader {
-            start_time: Local::now().to_rfc3339(),
-            width: self.width,
-            height: self.height,
-            total_frames: self.frames.len() as u64,
-            duration_secs: self.start_time.elapsed().as_secs_f64(),
-        };
-        let hdr_json = serde_json::to_string_pretty(&header).map_err(|e| e.to_string())?;
-        fs::write(format!("{}/session.json", path), hdr_json).map_err(|e| e.to_string())?;
-
-        // Save bookmarks
-        let bm_json = serde_json::to_string_pretty(&self.bookmarks).map_err(|e| e.to_string())?;
-        fs::write(format!("{}/bookmarks.json", path), bm_json).map_err(|e| e.to_string())?;
-
-        // Save H.264 stream
-        let mut h264 = Vec::new();
-        for (_, nalu) in &self.frames {
-            h264.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
-            h264.extend_from_slice(nalu);
-        }
-        fs::write(format!("{}/video.h264", path), h264).map_err(|e| e.to_string())?;
-
-        info!(path = %path, frames = self.frames.len(), "Session saved");
-        Ok(path)
-    }
 }
 
 /// Loads a saved session and replays its NAL units at their recorded timestamps.
@@ -246,7 +157,10 @@ fn index_nal_units(bytes: &[u8]) -> Vec<(usize, usize)> {
 /// pauses first, then seeks, then resumes.
 #[derive(Clone)]
 pub struct SessionPlaybackController {
-    active: Arc<AtomicBool>,
+    /// Run flag of the playback in progress. Each `play()` gets its own flag,
+    /// so `pause()` + an immediate `play()` cannot revive the previous decode
+    /// task (with a single shared flag both tasks would keep publishing).
+    run: Arc<std::sync::Mutex<Option<Arc<AtomicBool>>>>,
     loaded: Arc<std::sync::Mutex<Option<Arc<SessionPlayer>>>>,
     position: Arc<AtomicUsize>,
     frame_bus: FrameBus,
@@ -258,7 +172,7 @@ pub struct SessionPlaybackController {
 impl SessionPlaybackController {
     pub fn new(frame_bus: FrameBus) -> Self {
         Self {
-            active: Arc::new(AtomicBool::new(false)),
+            run: Arc::new(std::sync::Mutex::new(None)),
             loaded: Arc::new(std::sync::Mutex::new(None)),
             position: Arc::new(AtomicUsize::new(0)),
             frame_bus,
@@ -272,8 +186,12 @@ impl SessionPlaybackController {
         self
     }
 
+    fn run_slot(&self) -> std::sync::MutexGuard<'_, Option<Arc<AtomicBool>>> {
+        self.run.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     pub fn is_active(&self) -> bool {
-        self.active.load(Ordering::SeqCst)
+        self.run_slot().is_some()
     }
 
     pub fn current_position(&self) -> usize {
@@ -302,7 +220,7 @@ impl SessionPlaybackController {
     pub fn load(&self, dir: impl AsRef<Path>) -> Result<SessionHeader, String> {
         // Stop before swapping so a stale writer task does not feed the new
         // player's NALs into a doomed ffmpeg stdin.
-        self.active.store(false, Ordering::SeqCst);
+        self.pause();
         let player = SessionPlayer::load(dir)?;
         let header = player.header.clone();
         self.position.store(0, Ordering::SeqCst);
@@ -318,7 +236,8 @@ impl SessionPlaybackController {
             let slot = self.loaded.lock().unwrap_or_else(|e| e.into_inner());
             slot.as_ref().cloned().ok_or("no session loaded")?
         };
-        if self.active.load(Ordering::SeqCst) {
+        let mut run_slot = self.run_slot();
+        if run_slot.is_some() {
             return Ok(());
         }
 
@@ -344,33 +263,56 @@ impl SessionPlaybackController {
             .spawn()
             .map_err(|e| format!("spawn ffmpeg: {e}"))?;
 
-        self.active.store(true, Ordering::SeqCst);
+        let active = Arc::new(AtomicBool::new(true));
+        *run_slot = Some(active.clone());
+        drop(run_slot);
+        // Replay owns the screen until it ends: live capture frames are
+        // dropped so the two streams don't interleave.
+        self.frame_bus.set_live_suspended(true);
+
         let player_for_task = player.clone();
         let position = self.position.clone();
-        let active = self.active.clone();
         let frame_bus = self.frame_bus.clone();
+        let run = self.run.clone();
         tokio::spawn(async move {
-            if let Err(e) =
-                run_playback(player_for_task, position, active.clone(), frame_bus, child).await
+            if let Err(e) = run_playback(
+                player_for_task,
+                position,
+                active.clone(),
+                frame_bus.clone(),
+                child,
+            )
+            .await
             {
                 warn!(error = %e, "playback task ended with error");
             }
             active.store(false, Ordering::SeqCst);
+            // Natural end (EOF / decoder exit): release the slot if it is
+            // still ours and hand the screen back to live capture.
+            let mut slot = run.lock().unwrap_or_else(|e| e.into_inner());
+            if slot.as_ref().is_some_and(|f| Arc::ptr_eq(f, &active)) {
+                *slot = None;
+                frame_bus.set_live_suspended(false);
+            }
         });
         Ok(())
     }
 
-    /// Flip the active flag off. The decode task observes it and tears down
-    /// its ffmpeg child (via `Child::kill_on_drop`).
+    /// Stop the current playback. The decode task observes its flag and
+    /// tears down its ffmpeg child (via `Child::kill_on_drop`); live capture
+    /// resumes immediately.
     pub fn pause(&self) {
-        self.active.store(false, Ordering::SeqCst);
+        if let Some(flag) = self.run_slot().take() {
+            flag.store(false, Ordering::SeqCst);
+            self.frame_bus.set_live_suspended(false);
+        }
     }
 
     /// Update the playback position by proportional seek. Requires the
     /// playback to be paused; returns `Err` while playing to avoid racing the
     /// live decode task on position updates.
     pub fn seek(&self, timestamp_us: u64) -> Result<usize, String> {
-        if self.active.load(Ordering::SeqCst) {
+        if self.is_active() {
             return Err("pause before seeking".to_string());
         }
         let slot = self.loaded.lock().unwrap_or_else(|e| e.into_inner());
@@ -441,7 +383,7 @@ async fn run_playback(
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_micros() as u64)
                         .unwrap_or(0);
-                    frame_bus.publish(Frame {
+                    frame_bus.publish_replay(Frame {
                         width,
                         height,
                         rgba: buf.clone(),
